@@ -2,7 +2,7 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <title>Gemini Live Translate - Stabil Push-To-Talk</title>
+  <title>Gemini Live Translate - Sanity Check</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-white p-8 max-w-2xl mx-auto space-y-6 font-sans">
@@ -20,7 +20,7 @@
         <input type="text" id="targetLang" value="en" class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm">
       </div>
       <div class="flex items-end">
-        <button id="btnConnect" class="px-6 py-2 bg-green-600 hover:bg-green-500 font-bold text-sm rounded">
+        <button id="btnConnect" class="px-6 py-2 bg-green-600 hover:bg-green-500 font-bold text-sm rounded cursor-pointer">
           Anslut
         </button>
       </div>
@@ -53,7 +53,7 @@
     let scriptProcessor = null;
     let isTalking = false;
 
-    // 1. Koppla upp i förväg och vänta på setupComplete
+    // 1. Anslut WebSocket med giltig v1beta-struktur
     btnConnect.addEventListener('click', () => {
       const key = apiKeyInput.value.trim();
       if (!key) return alert('Ange din API-nyckel!');
@@ -61,33 +61,33 @@
       if (ws) ws.close();
 
       statusEl.innerText = 'Status: Ansluter till Gemini WebSocket...';
-      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${key}`;
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${key}`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         statusEl.innerText = 'Status: WebSocket ansluten. Skickar konfiguration...';
         
-        // Officiell, ren setup-struktur för Live Translate
-        ws.send(JSON.stringify({
+        // Korrekt setup utan felaktigt nästlade fält
+        const setupMsg = {
           setup: {
             model: "models/gemini-3.5-live-translate-preview",
             generationConfig: {
               responseModalities: ["AUDIO"],
-              inputAudioTranscription: {},
-              outputAudioTranscription: {},
               translationConfig: {
                 targetLanguageCode: targetLangInput.value.trim() || "en",
                 echoTargetLanguage: true
               }
             }
           }
-        }));
+        };
+
+        ws.send(JSON.stringify(setupMsg));
       };
 
       ws.onmessage = async (evt) => {
         let msg = evt.data instanceof Blob ? JSON.parse(await evt.data.text()) : JSON.parse(evt.data);
 
-        // Lås upp knappen ENBART när setupComplete mottagits
+        // Lås upp knappen först när setupComplete har mottagits
         if (msg.setupComplete) {
           statusEl.innerText = 'Status: Redo! Håll in knappen för att tala.';
           pttBtn.disabled = false;
@@ -108,7 +108,7 @@
         }
       };
 
-      ws.onerror = () => { statusEl.innerText = 'Status: ❌ WebSocket-fel!'; };
+      ws.onerror = (e) => { statusEl.innerText = 'Status: ❌ WebSocket-fel!'; };
       ws.onclose = (e) => { 
         statusEl.innerText = `Status: Frånkopplad (Kod: ${e.code}).`; 
         pttBtn.disabled = true;
@@ -118,7 +118,7 @@
       };
     });
 
-    // 2. Starta tal (Tryck ner knapp)
+    // 2. Starta röstinspelning (Tryck ner knapp)
     pttBtn.addEventListener('mousedown', async () => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -160,7 +160,7 @@
       scriptProcessor.connect(audioContext.destination);
     });
 
-    // 3. Släpp knapp -> Stoppa mikrofonen
+    // 3. Stoppa mikrofonen när knappen släpps
     async function stopTalking() {
       if (!isTalking) return;
       isTalking = false;
@@ -169,7 +169,7 @@
       if (audioContext) await audioContext.close();
 
       if (ws && ws.readyState === WebSocket.OPEN) {
-        statusEl.innerText = 'Status: ⏹ Väntar på Gemini översättning...';
+        statusEl.innerText = 'Status: ⏹ Väntar på översättning...';
       }
     }
 
