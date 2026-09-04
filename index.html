@@ -2,11 +2,11 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <title>Gemini Live Translate - NDI & Hackfri uppspelning</title>
+  <title>Gemini Live Translate - Kontinuerlig Simultanöversättning</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-white p-8 max-w-2xl mx-auto space-y-6 font-sans">
-  <h1 class="text-xl font-bold text-blue-400">Gemini Live Translate - NDI & Jitter Buffer</h1>
+  <h1 class="text-xl font-bold text-blue-400">Gemini Live - Kontinuerlig Simultanöversättning</h1>
 
   <!-- Inställningar & Enhetsval -->
   <div class="bg-slate-800 p-4 rounded-lg space-y-3">
@@ -16,41 +16,34 @@
     </div>
 
     <div>
-      <label class="block text-xs font-medium text-slate-300 mb-1">Ljudkälla (Välj NDI Webcam Input):</label>
+      <label class="block text-xs font-medium text-slate-300 mb-1">Ljudkälla (NDI Webcam Input):</label>
       <div class="flex gap-2">
         <select id="deviceSelect" class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm"></select>
-        <button id="btnRefreshDevices" class="px-3 py-1 bg-slate-600 hover:bg-slate-500 text-xs rounded">Sök enheter</button>
+        <button id="btnRefreshDevices" class="px-3 py-1 bg-slate-600 hover:bg-slate-500 text-xs rounded cursor-pointer">Sök enheter</button>
       </div>
     </div>
 
-    <div class="flex gap-4">
-      <div class="flex-1">
-        <label class="block text-xs font-medium text-slate-300 mb-1">Målspråk:</label>
-        <input type="text" id="targetLang" value="en" class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm">
-      </div>
-      <div class="flex items-end">
-        <button id="btnConnect" class="px-6 py-2 bg-green-600 hover:bg-green-500 font-bold text-sm rounded cursor-pointer">
-          Anslut
-        </button>
-      </div>
+    <div>
+      <label class="block text-xs font-medium text-slate-300 mb-1">Målspråk:</label>
+      <input type="text" id="targetLang" value="en" class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm">
     </div>
   </div>
 
-  <!-- Push-To-Talk -->
+  <!-- Huvudknapp med dynamisk status -->
   <div class="flex justify-center">
-    <button id="pttBtn" disabled class="w-full py-8 bg-slate-700 text-slate-500 cursor-not-allowed font-bold text-lg rounded-xl select-none shadow-lg transition-colors">
-      KOPPLA UPP FÖRST
+    <button id="btnToggleConnection" class="w-full py-6 bg-green-600 hover:bg-green-500 text-white font-bold text-lg rounded-xl shadow-lg transition-all cursor-pointer">
+      Starta Simultanöversättning (Anslut)
     </button>
   </div>
 
+  <!-- Status & Transkription -->
   <div class="bg-slate-800 p-4 rounded-lg space-y-2">
     <div id="status" class="text-slate-400 font-mono text-sm">Status: Ej ansluten</div>
-    <div id="transcript" class="text-green-400 font-sans text-base min-h-[3rem]"></div>
+    <div id="transcript" class="text-green-400 font-sans text-base min-h-[4rem] max-h-48 overflow-y-auto"></div>
   </div>
 
   <script>
-    const pttBtn = document.getElementById('pttBtn');
-    const btnConnect = document.getElementById('btnConnect');
+    const btnToggleConnection = document.getElementById('btnToggleConnection');
     const btnRefreshDevices = document.getElementById('btnRefreshDevices');
     const deviceSelect = document.getElementById('deviceSelect');
     const statusEl = document.getElementById('status');
@@ -58,20 +51,29 @@
     const apiKeyInput = document.getElementById('apiKey');
     const targetLangInput = document.getElementById('targetLang');
 
+    // Tillståndshantering för anslutningen
+    const ConnectionState = {
+      DISCONNECTED: 'DISCONNECTED',
+      CONNECTING: 'CONNECTING',
+      CONNECTED: 'CONNECTED',
+      DISCONNECTING: 'DISCONNECTING'
+    };
+    let currentState = ConnectionState.DISCONNECTED;
+
     let ws = null;
     let audioContext = null;
     let mediaStream = null;
     let scriptProcessor = null;
-    let isTalking = false;
 
-    // Variabler för sömlös ljudkö (förhindrar hackat ljud)
+    // Ljudkö & Avbrottshantering
     let playbackCtx = null;
     let nextStartTime = 0;
+    let activeAudioSources = [];
 
-    // 1. Sök och lista alla mikrofoner / NDI-enheter
+    // 1. Sök och lista alla NDI/mikrofonenheter
     async function loadAudioDevices() {
       try {
-        await navigator.mediaDevices.getUserMedia({ audio: true }); // Begär tillstånd först
+        await navigator.mediaDevices.getUserMedia({ audio: true });
         const devices = await navigator.mediaDevices.enumerateDevices();
         const audioInputs = devices.filter(d => d.kind === 'audioinput');
         
@@ -81,33 +83,74 @@
           opt.value = d.deviceId;
           opt.text = d.label || `Ljudenhet ${i + 1}`;
           if (d.label.toLowerCase().includes('ndi') || d.label.toLowerCase().includes('newtek')) {
-            opt.selected = true; // Förvälj NDI om den hittas
+            opt.selected = true;
           }
           deviceSelect.appendChild(opt);
         });
 
-        statusEl.innerText = `Status: Hittade ${audioInputs.length} ljudenheter. Selecta NDI nedan.`;
+        statusEl.innerText = `Status: Hittade ${audioInputs.length} ljudenheter. Selecta NDI.`;
       } catch (err) {
-        statusEl.innerText = 'Status: Kunde inte lista ljudenheter. Ge mikrofontillstånd.';
+        statusEl.innerText = 'Status: Kunde inte lista ljudenheter. Ge tillstånd i webbläsaren.';
       }
     }
 
     btnRefreshDevices.addEventListener('click', loadAudioDevices);
     loadAudioDevices();
 
-    // 2. Anslut till Gemini Live Translate
-    btnConnect.addEventListener('click', () => {
+    // 2. Uppdatera knappens utseende dynamiskt
+    function setConnectionState(newState) {
+      currentState = newState;
+      switch (newState) {
+        case ConnectionState.DISCONNECTED:
+          btnToggleConnection.innerText = 'Starta Simultanöversättning (Anslut)';
+          btnToggleConnection.className = 'w-full py-6 bg-green-600 hover:bg-green-500 text-white font-bold text-lg rounded-xl shadow-lg transition-all cursor-pointer';
+          btnToggleConnection.disabled = false;
+          statusEl.innerText = 'Status: Frånkopplad.';
+          break;
+
+        case ConnectionState.CONNECTING:
+          btnToggleConnection.innerText = 'Ansluter till Gemini...';
+          btnToggleConnection.className = 'w-full py-6 bg-yellow-600 text-white font-bold text-lg rounded-xl shadow-lg transition-all cursor-wait';
+          btnToggleConnection.disabled = true;
+          statusEl.innerText = 'Status: Upprättar anslutning och konfiguration...';
+          break;
+
+        case ConnectionState.CONNECTED:
+          btnToggleConnection.innerText = 'Stoppa Simultanöversättning (Koppla från)';
+          btnToggleConnection.className = 'w-full py-6 bg-red-600 hover:bg-red-500 text-white font-bold text-lg rounded-xl shadow-lg transition-all cursor-pointer';
+          btnToggleConnection.disabled = false;
+          statusEl.innerText = 'Status: 🔴 Live (Lyssnar och översätter kontinuerligt)';
+          break;
+
+        case ConnectionState.DISCONNECTING:
+          btnToggleConnection.innerText = 'Kopplar från...';
+          btnToggleConnection.className = 'w-full py-6 bg-slate-700 text-slate-400 font-bold text-lg rounded-xl shadow-lg transition-all cursor-wait';
+          btnToggleConnection.disabled = true;
+          statusEl.innerText = 'Status: Stänger alla strömmar och ljudkort...';
+          break;
+      }
+    }
+
+    // 3. Hantera klick på huvudknappen (Starta / Stoppa)
+    btnToggleConnection.addEventListener('click', () => {
+      if (currentState === ConnectionState.DISCONNECTED) {
+        startTranslationPipeline();
+      } else if (currentState === ConnectionState.CONNECTED) {
+        stopTranslationPipeline();
+      }
+    });
+
+    // 4. Starta hela översättningspipelinen
+    async function startTranslationPipeline() {
       const key = apiKeyInput.value.trim();
-      if (!key) return alert('Ange din API-nyckel!');
+      if (!key) return alert('Ange din Gemini API-nyckel!');
 
-      if (ws) ws.close();
+      setConnectionState(ConnectionState.CONNECTING);
 
-      statusEl.innerText = 'Status: Ansluter till Gemini...';
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${key}`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        statusEl.innerText = 'Status: Skickar konfiguration...';
         ws.send(JSON.stringify({
           setup: {
             model: "models/gemini-3.5-live-translate-preview",
@@ -115,7 +158,7 @@
               responseModalities: ["AUDIO"],
               translationConfig: {
                 targetLanguageCode: targetLangInput.value.trim() || "en",
-                echoTargetLanguage: true
+                echoTargetLanguage: false
               }
             }
           }
@@ -125,53 +168,50 @@
       ws.onmessage = async (evt) => {
         let msg = evt.data instanceof Blob ? JSON.parse(await evt.data.text()) : JSON.parse(evt.data);
 
+        // När konfigurationen är klar -> Starta NDI-mikrofonströmmen automatiskt
         if (msg.setupComplete) {
-          statusEl.innerText = 'Status: Redo! Håll in knappen för att tala.';
-          pttBtn.disabled = false;
-          pttBtn.innerText = 'HÅLL IN FÖR ATT TALA (Push-To-Talk)';
-          pttBtn.className = 'w-full py-8 bg-blue-600 hover:bg-blue-500 active:bg-red-600 text-white cursor-pointer font-bold text-lg rounded-xl select-none shadow-lg transition-colors';
+          await startMicStreaming();
+          setConnectionState(ConnectionState.CONNECTED);
         }
+
+        // Hantera avbrott (Om talaren börjar prata igen, tysta pågående översättning)
+        //if (msg.serverContent?.interrupted) {
+        //  clearAudioQueue();
+        //}
 
         if (msg.serverContent?.modelTurn?.parts) {
           for (let part of msg.serverContent.modelTurn.parts) {
             if (part.text) {
               transcriptEl.innerText += part.text + " ";
+              transcriptEl.scrollTop = transcriptEl.scrollHeight;
             }
             if (part.inlineData?.data) {
-              statusEl.innerText = 'Status: 🔊 Spelar upp översättning...';
-              queueAudio24kHz(part.inlineData.data); // Anrop till den hackfria kön
+              queueAudio24kHz(part.inlineData.data);
             }
           }
         }
       };
 
-      ws.onerror = () => { statusEl.innerText = 'Status: ❌ WebSocket-fel!'; };
-      ws.onclose = (e) => { 
-        statusEl.innerText = `Status: Frånkopplad (Kod: ${e.code}).`; 
-        pttBtn.disabled = true;
-        pttBtn.innerText = 'KOPPLA UPP FÖRST';
-        pttBtn.className = 'w-full py-8 bg-slate-700 text-slate-500 cursor-not-allowed font-bold text-lg rounded-xl select-none shadow-lg';
-        ws = null; 
+      ws.onerror = (e) => {
+        alert('WebSocket-fel uppstod. Kontrollera API-nyckeln.');
+        stopTranslationPipeline();
       };
-    });
 
-    // 3. Starta NDI-Inspelning (Mousedown)
-    pttBtn.addEventListener('mousedown', async () => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.onclose = () => {
+        if (currentState !== ConnectionState.DISCONNECTED) {
+          stopTranslationPipeline();
+        }
+      };
+    }
 
-      isTalking = true;
-      transcriptEl.innerText = '';
-      statusEl.innerText = 'Status: 🎤 Strömmar NDI-ljud...';
-
-      // Nollställ ljudkö inför nytt svar
-      if (playbackCtx) nextStartTime = playbackCtx.currentTime;
-
+    // 5. Starta kontinuerlig mikrofon/NDI-strömning
+    async function startMicStreaming() {
       const selectedDeviceId = deviceSelect.value;
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-          echoCancellation: false,  // AVSTÄNGT för linjeljud/NDI!
-          noiseSuppression: false,  // AVSTÄNGT för linjeljud/NDI!
+          echoCancellation: false,
+          noiseSuppression: false,
           autoGainControl: false
         }
       });
@@ -183,7 +223,7 @@
       scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
       
       scriptProcessor.onaudioprocess = (e) => {
-        if (!isTalking || !ws || ws.readyState !== WebSocket.OPEN) return;
+        if (currentState !== ConnectionState.CONNECTED || !ws || ws.readyState !== WebSocket.OPEN) return;
 
         const float32 = e.inputBuffer.getChannelData(0);
         const pcm16 = convertTo16kHz(float32, inputRate);
@@ -204,24 +244,39 @@
 
       source.connect(scriptProcessor);
       scriptProcessor.connect(audioContext.destination);
-    });
-
-    // 4. Stoppa inspelning (Mouseup)
-    async function stopTalking() {
-      if (!isTalking) return;
-      isTalking = false;
-
-      if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
-      if (audioContext) await audioContext.close();
-
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        statusEl.innerText = 'Status: ⏹ Väntar på översättning...';
-      }
     }
 
-    pttBtn.addEventListener('mouseup', stopTalking);
-    pttBtn.addEventListener('mouseleave', stopTalking);
+    // 6. Stoppa och rensa allt rent vid frånkoppling
+    async function stopTranslationPipeline() {
+      setConnectionState(ConnectionState.DISCONNECTING);
 
+      clearAudioQueue();
+
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+      }
+
+      if (scriptProcessor) {
+        scriptProcessor.disconnect();
+        scriptProcessor = null;
+      }
+
+      if (audioContext) {
+        await audioContext.close();
+        audioContext = null;
+      }
+
+      if (ws) {
+        ws.onclose = null; // Förhindra dubbel-anrop
+        ws.close();
+        ws = null;
+      }
+
+      setConnectionState(ConnectionState.DISCONNECTED);
+    }
+
+    // 7. Konvertera Float32 -> 16kHz PCM16
     function convertTo16kHz(float32, inputRate) {
       const ratio = inputRate / 16000;
       const outLen = Math.floor(float32.length / ratio);
@@ -233,7 +288,7 @@
       return pcm16;
     }
 
-    // 5. HACKFRI LJUDKÖ (Schemalägger paketen sömlöst på en tidslinje)
+    // 8. Sömlös Ljudkö & Avbrottshantering
     function queueAudio24kHz(base64Str) {
       if (!playbackCtx || playbackCtx.state === 'closed') {
         playbackCtx = new AudioContext({ sampleRate: 24000 });
@@ -253,14 +308,27 @@
       src.buffer = buf;
       src.connect(playbackCtx.destination);
 
-      // Schemalägg uppspelning exakt när föregående paket slutar (med 40ms jitter-buffer)
       const currentTime = playbackCtx.currentTime;
       if (nextStartTime < currentTime) {
-        nextStartTime = currentTime + 0.04; 
+        nextStartTime = currentTime + 0.04;
       }
 
       src.start(nextStartTime);
-      nextStartTime += buf.duration; // Flytta fram tidslinjen med paketets längd
+      nextStartTime += buf.duration;
+
+      activeAudioSources.push(src);
+      src.onended = () => {
+        activeAudioSources = activeAudioSources.filter(s => s !== src);
+      };
+    }
+
+    // Tysta och rensa ljudkön direkt om avbrott sker
+    function clearAudioQueue() {
+      activeAudioSources.forEach(s => {
+        try { s.stop(); } catch(e){}
+      });
+      activeAudioSources = [];
+      if (playbackCtx) nextStartTime = playbackCtx.currentTime;
     }
   </script>
 </body>
