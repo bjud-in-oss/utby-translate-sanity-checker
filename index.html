@@ -216,53 +216,27 @@
       
       scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
       
-      scriptProcessor.onaudioprocess = (e) => {
-        if (currentState !== ConnectionState.CONNECTED || !ws || ws.readyState !== WebSocket.OPEN) return;
+scriptProcessor.onaudioprocess = (e) => {
+  // Skicka endast om anslutningen är öppen
+  if (currentState !== ConnectionState.CONNECTED || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-        const float32 = e.inputBuffer.getChannelData(0);
+  const float32 = e.inputBuffer.getChannelData(0);
+  const pcm16 = convertTo16kHz(float32, inputRate);
+  
+  const bytes = new Uint8Array(pcm16.buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
 
-        // Beräkna RMS (Ljudvolym)
-        let sum = 0;
-        for (let i = 0; i < float32.length; i++) {
-          sum += float32[i] * float32[i];
-        }
-        const rms = Math.sqrt(sum / float32.length);
-        const now = Date.now();
-
-        // Logik för VAD-Hysteres
-        if (rms > VAD_START_THRESHOLD) {
-          isSpeechActive = true;
-          lastSpeechTimestamp = now;
-        } else if (rms > VAD_CONTINUE_THRESHOLD && isSpeechActive) {
-          lastSpeechTimestamp = now; // Behåll talet aktivt
-        } else if (isSpeechActive && (now - lastSpeechTimestamp < HANGOVER_TIME_MS)) {
-          // Inom Hangover Time: Fortsätt skicka ljud under pausen
-        } else {
-          isSpeechActive = false; // Tystnaden har pågått längre än 1000ms
-        }
-
-        // Skicka endast ljud om tal eller Hangover Time är aktiv
-        if (!isSpeechActive) return;
-
-        const pcm16 = convertTo16kHz(float32, inputRate);
-        
-        const bytes = new Uint8Array(pcm16.buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-
-        ws.send(JSON.stringify({
-          realtimeInput: {
-            mediaChunks: [{
-              mimeType: "audio/pcm;rate=16000",
-              data: btoa(binary)
-            }]
-          }
-        }));
-      };
-
-      source.connect(scriptProcessor);
-      scriptProcessor.connect(audioContext.destination);
+  // Strömma ALLT ljud direkt till Gemini utan några lokala VAD-spärrar
+  ws.send(JSON.stringify({
+    realtimeInput: {
+      mediaChunks: [{
+        mimeType: "audio/pcm;rate=16000",
+        data: btoa(binary)
+      }]
     }
+  }));
+};
 
     async function stopTranslationPipeline() {
       setConnectionState(ConnectionState.DISCONNECTING);
