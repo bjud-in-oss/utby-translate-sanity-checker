@@ -2,11 +2,11 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <title>Gemini Live Translate - Kontinuerlig Simultanöversättning</title>
+  <title>Gemini Live Translate - Hysteres VAD</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-white p-8 max-w-2xl mx-auto space-y-6 font-sans">
-  <h1 class="text-xl font-bold text-blue-400">Gemini Live - Kontinuerlig Simultanöversättning</h1>
+  <h1 class="text-xl font-bold text-blue-400">Gemini Live - Hysteres VAD (Ingen Avhuggning)</h1>
 
   <!-- Inställningar & Enhetsval -->
   <div class="bg-slate-800 p-4 rounded-lg space-y-3">
@@ -51,7 +51,6 @@
     const apiKeyInput = document.getElementById('apiKey');
     const targetLangInput = document.getElementById('targetLang');
 
-    // Tillståndshantering för anslutningen
     const ConnectionState = {
       DISCONNECTED: 'DISCONNECTED',
       CONNECTING: 'CONNECTING',
@@ -65,12 +64,17 @@
     let mediaStream = null;
     let scriptProcessor = null;
 
-    // Ljudkö & Avbrottshantering
     let playbackCtx = null;
     let nextStartTime = 0;
     let activeAudioSources = [];
 
-    // 1. Sök och lista alla NDI/mikrofonenheter
+    // VAD-Hysteres Parametrar (från Phase 7)
+    const VAD_START_THRESHOLD = 0.015; // Tröskel för att starta tal
+    const VAD_CONTINUE_THRESHOLD = 0.005; // Lägre tröskel för att behålla tal (Hysteres)
+    const HANGOVER_TIME_MS = 1000; // Vänta 1 sekund under pauser innan tal anses stängt
+    let lastSpeechTimestamp = 0;
+    let isSpeechActive = false;
+
     async function loadAudioDevices() {
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -88,7 +92,7 @@
           deviceSelect.appendChild(opt);
         });
 
-        statusEl.innerText = `Status: Hittade ${audioInputs.length} ljudenheter. Selecta NDI.`;
+        statusEl.innerText = `Status: Hittade ${audioInputs.length} ljudenheter. Välj NDI.`;
       } catch (err) {
         statusEl.innerText = 'Status: Kunde inte lista ljudenheter. Ge tillstånd i webbläsaren.';
       }
@@ -97,7 +101,6 @@
     btnRefreshDevices.addEventListener('click', loadAudioDevices);
     loadAudioDevices();
 
-    // 2. Uppdatera knappens utseende dynamiskt
     function setConnectionState(newState) {
       currentState = newState;
       switch (newState) {
@@ -112,26 +115,25 @@
           btnToggleConnection.innerText = 'Ansluter till Gemini...';
           btnToggleConnection.className = 'w-full py-6 bg-yellow-600 text-white font-bold text-lg rounded-xl shadow-lg transition-all cursor-wait';
           btnToggleConnection.disabled = true;
-          statusEl.innerText = 'Status: Upprättar anslutning och konfiguration...';
+          statusEl.innerText = 'Status: Upprättar anslutning...';
           break;
 
         case ConnectionState.CONNECTED:
           btnToggleConnection.innerText = 'Stoppa Simultanöversättning (Koppla från)';
           btnToggleConnection.className = 'w-full py-6 bg-red-600 hover:bg-red-500 text-white font-bold text-lg rounded-xl shadow-lg transition-all cursor-pointer';
           btnToggleConnection.disabled = false;
-          statusEl.innerText = 'Status: 🔴 Live (Lyssnar och översätter kontinuerligt)';
+          statusEl.innerText = 'Status: 🔴 Live (Hysteres VAD aktiv)';
           break;
 
         case ConnectionState.DISCONNECTING:
           btnToggleConnection.innerText = 'Kopplar från...';
           btnToggleConnection.className = 'w-full py-6 bg-slate-700 text-slate-400 font-bold text-lg rounded-xl shadow-lg transition-all cursor-wait';
           btnToggleConnection.disabled = true;
-          statusEl.innerText = 'Status: Stänger alla strömmar och ljudkort...';
+          statusEl.innerText = 'Status: Stänger strömmar...';
           break;
       }
     }
 
-    // 3. Hantera klick på huvudknappen (Starta / Stoppa)
     btnToggleConnection.addEventListener('click', () => {
       if (currentState === ConnectionState.DISCONNECTED) {
         startTranslationPipeline();
@@ -140,7 +142,6 @@
       }
     });
 
-    // 4. Starta hela översättningspipelinen
     async function startTranslationPipeline() {
       const key = apiKeyInput.value.trim();
       if (!key) return alert('Ange din Gemini API-nyckel!');
@@ -168,16 +169,10 @@
       ws.onmessage = async (evt) => {
         let msg = evt.data instanceof Blob ? JSON.parse(await evt.data.text()) : JSON.parse(evt.data);
 
-        // När konfigurationen är klar -> Starta NDI-mikrofonströmmen automatiskt
         if (msg.setupComplete) {
           await startMicStreaming();
           setConnectionState(ConnectionState.CONNECTED);
         }
-
-        // Hantera avbrott (Om talaren börjar prata igen, tysta pågående översättning)
-        //if (msg.serverContent?.interrupted) {
-        //  clearAudioQueue();
-        //}
 
         if (msg.serverContent?.modelTurn?.parts) {
           for (let part of msg.serverContent.modelTurn.parts) {
@@ -192,8 +187,8 @@
         }
       };
 
-      ws.onerror = (e) => {
-        alert('WebSocket-fel uppstod. Kontrollera API-nyckeln.');
+      ws.onerror = () => {
+        alert('WebSocket-fel uppstod.');
         stopTranslationPipeline();
       };
 
@@ -204,7 +199,6 @@
       };
     }
 
-    // 5. Starta kontinuerlig mikrofon/NDI-strömning
     async function startMicStreaming() {
       const selectedDeviceId = deviceSelect.value;
       mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -223,45 +217,53 @@
       scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
       
       scriptProcessor.onaudioprocess = (e) => {
-  if (currentState !== ConnectionState.CONNECTED || !ws || ws.readyState !== WebSocket.OPEN) return;
+        if (currentState !== ConnectionState.CONNECTED || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-  const float32 = e.inputBuffer.getChannelData(0);
+        const float32 = e.inputBuffer.getChannelData(0);
 
-  // 1. Beräkna ljudvolym (RMS)
-  let sum = 0;
-  for (let i = 0; i < float32.length; i++) {
-    sum += float32[i] * float32[i];
-  }
-  const rms = Math.sqrt(sum / float32.length);
+        // Beräkna RMS (Ljudvolym)
+        let sum = 0;
+        for (let i = 0; i < float32.length; i++) {
+          sum += float32[i] * float32[i];
+        }
+        const rms = Math.sqrt(sum / float32.length);
+        const now = Date.now();
 
-  // 2. Brusgrind (Noise Gate): Skicka endast om någon faktiskt talar (RMS > 0.01)
-  const NOISE_THRESHOLD = 0.01; 
-  if (rms < NOISE_THRESHOLD) {
-    return; // Tystnad: Skicka inga paket som kan lura modellen att hallucinera
-  }
+        // Logik för VAD-Hysteres
+        if (rms > VAD_START_THRESHOLD) {
+          isSpeechActive = true;
+          lastSpeechTimestamp = now;
+        } else if (rms > VAD_CONTINUE_THRESHOLD && isSpeechActive) {
+          lastSpeechTimestamp = now; // Behåll talet aktivt
+        } else if (isSpeechActive && (now - lastSpeechTimestamp < HANGOVER_TIME_MS)) {
+          // Inom Hangover Time: Fortsätt skicka ljud under pausen
+        } else {
+          isSpeechActive = false; // Tystnaden har pågått längre än 1000ms
+        }
 
-  // 3. Konvertera och skicka endast när tal detekteras
-  const pcm16 = convertTo16kHz(float32, inputRate);
-  
-  const bytes = new Uint8Array(pcm16.buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        // Skicka endast ljud om tal eller Hangover Time är aktiv
+        if (!isSpeechActive) return;
 
-  ws.send(JSON.stringify({
-    realtimeInput: {
-      mediaChunks: [{
-        mimeType: "audio/pcm;rate=16000",
-        data: btoa(binary)
-      }]
-    }
-  }));
-};
+        const pcm16 = convertTo16kHz(float32, inputRate);
+        
+        const bytes = new Uint8Array(pcm16.buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+
+        ws.send(JSON.stringify({
+          realtimeInput: {
+            mediaChunks: [{
+              mimeType: "audio/pcm;rate=16000",
+              data: btoa(binary)
+            }]
+          }
+        }));
+      };
 
       source.connect(scriptProcessor);
       scriptProcessor.connect(audioContext.destination);
     }
 
-    // 6. Stoppa och rensa allt rent vid frånkoppling
     async function stopTranslationPipeline() {
       setConnectionState(ConnectionState.DISCONNECTING);
 
@@ -283,7 +285,7 @@
       }
 
       if (ws) {
-        ws.onclose = null; // Förhindra dubbel-anrop
+        ws.onclose = null;
         ws.close();
         ws = null;
       }
@@ -291,7 +293,6 @@
       setConnectionState(ConnectionState.DISCONNECTED);
     }
 
-    // 7. Konvertera Float32 -> 16kHz PCM16
     function convertTo16kHz(float32, inputRate) {
       const ratio = inputRate / 16000;
       const outLen = Math.floor(float32.length / ratio);
@@ -303,7 +304,6 @@
       return pcm16;
     }
 
-    // 8. Sömlös Ljudkö & Avbrottshantering
     function queueAudio24kHz(base64Str) {
       if (!playbackCtx || playbackCtx.state === 'closed') {
         playbackCtx = new AudioContext({ sampleRate: 24000 });
@@ -337,7 +337,6 @@
       };
     }
 
-    // Tysta och rensa ljudkön direkt om avbrott sker
     function clearAudioQueue() {
       activeAudioSources.forEach(s => {
         try { s.stop(); } catch(e){}
