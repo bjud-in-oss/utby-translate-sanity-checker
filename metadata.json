@@ -1,0 +1,6 @@
+{
+  "name": "Gemini Live Audio Sanity Check",
+  "description": "Fristående Web Audio-applikation för sanitetstest av ljudström mot Google Gemini Live Translate API.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
