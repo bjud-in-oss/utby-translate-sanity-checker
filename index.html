@@ -2,18 +2,27 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <title>Gemini Live Translate - Sanity Check</title>
+  <title>Gemini Live Translate - NDI & Hackfri uppspelning</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-white p-8 max-w-2xl mx-auto space-y-6 font-sans">
-  <h1 class="text-xl font-bold text-blue-400">Gemini Live Translate - Sanity Check</h1>
+  <h1 class="text-xl font-bold text-blue-400">Gemini Live Translate - NDI & Jitter Buffer</h1>
 
-  <!-- Inställningar & Anslutning -->
+  <!-- Inställningar & Enhetsval -->
   <div class="bg-slate-800 p-4 rounded-lg space-y-3">
     <div>
       <label class="block text-xs font-medium text-slate-300 mb-1">Gemini API-nyckel:</label>
       <input type="password" id="apiKey" placeholder="AIzaSy..." class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm">
     </div>
+
+    <div>
+      <label class="block text-xs font-medium text-slate-300 mb-1">Ljudkälla (Välj NDI Webcam Input):</label>
+      <div class="flex gap-2">
+        <select id="deviceSelect" class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm"></select>
+        <button id="btnRefreshDevices" class="px-3 py-1 bg-slate-600 hover:bg-slate-500 text-xs rounded">Sök enheter</button>
+      </div>
+    </div>
+
     <div class="flex gap-4">
       <div class="flex-1">
         <label class="block text-xs font-medium text-slate-300 mb-1">Målspråk:</label>
@@ -27,7 +36,7 @@
     </div>
   </div>
 
-  <!-- Taltangent -->
+  <!-- Push-To-Talk -->
   <div class="flex justify-center">
     <button id="pttBtn" disabled class="w-full py-8 bg-slate-700 text-slate-500 cursor-not-allowed font-bold text-lg rounded-xl select-none shadow-lg transition-colors">
       KOPPLA UPP FÖRST
@@ -42,6 +51,8 @@
   <script>
     const pttBtn = document.getElementById('pttBtn');
     const btnConnect = document.getElementById('btnConnect');
+    const btnRefreshDevices = document.getElementById('btnRefreshDevices');
+    const deviceSelect = document.getElementById('deviceSelect');
     const statusEl = document.getElementById('status');
     const transcriptEl = document.getElementById('transcript');
     const apiKeyInput = document.getElementById('apiKey');
@@ -53,22 +64,51 @@
     let scriptProcessor = null;
     let isTalking = false;
 
-    // 1. Anslut WebSocket med giltig v1beta-struktur
+    // Variabler för sömlös ljudkö (förhindrar hackat ljud)
+    let playbackCtx = null;
+    let nextStartTime = 0;
+
+    // 1. Sök och lista alla mikrofoner / NDI-enheter
+    async function loadAudioDevices() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true }); // Begär tillstånd först
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(d => d.kind === 'audioinput');
+        
+        deviceSelect.innerHTML = '';
+        audioInputs.forEach((d, i) => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.text = d.label || `Ljudenhet ${i + 1}`;
+          if (d.label.toLowerCase().includes('ndi') || d.label.toLowerCase().includes('newtek')) {
+            opt.selected = true; // Förvälj NDI om den hittas
+          }
+          deviceSelect.appendChild(opt);
+        });
+
+        statusEl.innerText = `Status: Hittade ${audioInputs.length} ljudenheter. Selecta NDI nedan.`;
+      } catch (err) {
+        statusEl.innerText = 'Status: Kunde inte lista ljudenheter. Ge mikrofontillstånd.';
+      }
+    }
+
+    btnRefreshDevices.addEventListener('click', loadAudioDevices);
+    loadAudioDevices();
+
+    // 2. Anslut till Gemini Live Translate
     btnConnect.addEventListener('click', () => {
       const key = apiKeyInput.value.trim();
       if (!key) return alert('Ange din API-nyckel!');
 
       if (ws) ws.close();
 
-      statusEl.innerText = 'Status: Ansluter till Gemini WebSocket...';
+      statusEl.innerText = 'Status: Ansluter till Gemini...';
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${key}`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        statusEl.innerText = 'Status: WebSocket ansluten. Skickar konfiguration...';
-        
-        // Korrekt setup utan felaktigt nästlade fält
-        const setupMsg = {
+        statusEl.innerText = 'Status: Skickar konfiguration...';
+        ws.send(JSON.stringify({
           setup: {
             model: "models/gemini-3.5-live-translate-preview",
             generationConfig: {
@@ -79,15 +119,12 @@
               }
             }
           }
-        };
-
-        ws.send(JSON.stringify(setupMsg));
+        }));
       };
 
       ws.onmessage = async (evt) => {
         let msg = evt.data instanceof Blob ? JSON.parse(await evt.data.text()) : JSON.parse(evt.data);
 
-        // Lås upp knappen först när setupComplete har mottagits
         if (msg.setupComplete) {
           statusEl.innerText = 'Status: Redo! Håll in knappen för att tala.';
           pttBtn.disabled = false;
@@ -102,13 +139,13 @@
             }
             if (part.inlineData?.data) {
               statusEl.innerText = 'Status: 🔊 Spelar upp översättning...';
-              playAudio24kHz(part.inlineData.data);
+              queueAudio24kHz(part.inlineData.data); // Anrop till den hackfria kön
             }
           }
         }
       };
 
-      ws.onerror = (e) => { statusEl.innerText = 'Status: ❌ WebSocket-fel!'; };
+      ws.onerror = () => { statusEl.innerText = 'Status: ❌ WebSocket-fel!'; };
       ws.onclose = (e) => { 
         statusEl.innerText = `Status: Frånkopplad (Kod: ${e.code}).`; 
         pttBtn.disabled = true;
@@ -118,16 +155,25 @@
       };
     });
 
-    // 2. Starta röstinspelning (Tryck ner knapp)
+    // 3. Starta NDI-Inspelning (Mousedown)
     pttBtn.addEventListener('mousedown', async () => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
       isTalking = true;
       transcriptEl.innerText = '';
-      statusEl.innerText = 'Status: 🎤 Strömmar ljud...';
+      statusEl.innerText = 'Status: 🎤 Strömmar NDI-ljud...';
 
+      // Nollställ ljudkö inför nytt svar
+      if (playbackCtx) nextStartTime = playbackCtx.currentTime;
+
+      const selectedDeviceId = deviceSelect.value;
       mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        audio: {
+          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
+          echoCancellation: false,  // AVSTÄNGT för linjeljud/NDI!
+          noiseSuppression: false,  // AVSTÄNGT för linjeljud/NDI!
+          autoGainControl: false
+        }
       });
 
       audioContext = new AudioContext();
@@ -160,7 +206,7 @@
       scriptProcessor.connect(audioContext.destination);
     });
 
-    // 3. Stoppa mikrofonen när knappen släpps
+    // 4. Stoppa inspelning (Mouseup)
     async function stopTalking() {
       if (!isTalking) return;
       isTalking = false;
@@ -187,21 +233,34 @@
       return pcm16;
     }
 
-    function playAudio24kHz(base64Str) {
+    // 5. HACKFRI LJUDKÖ (Schemalägger paketen sömlöst på en tidslinje)
+    function queueAudio24kHz(base64Str) {
+      if (!playbackCtx || playbackCtx.state === 'closed') {
+        playbackCtx = new AudioContext({ sampleRate: 24000 });
+        nextStartTime = playbackCtx.currentTime;
+      }
+
       const str = atob(base64Str);
       const bytes = new Uint8Array(str.length);
       for (let i = 0; i < str.length; i++) bytes[i] = str.charCodeAt(i);
       const pcm16 = new Int16Array(bytes.buffer);
 
-      const ctx = new AudioContext({ sampleRate: 24000 });
-      const buf = ctx.createBuffer(1, pcm16.length, 24000);
+      const buf = playbackCtx.createBuffer(1, pcm16.length, 24000);
       const ch = buf.getChannelData(0);
       for (let i = 0; i < pcm16.length; i++) ch[i] = pcm16[i] / 32768.0;
 
-      const src = ctx.createBufferSource();
+      const src = playbackCtx.createBufferSource();
       src.buffer = buf;
-      src.connect(ctx.destination);
-      src.start();
+      src.connect(playbackCtx.destination);
+
+      // Schemalägg uppspelning exakt när föregående paket slutar (med 40ms jitter-buffer)
+      const currentTime = playbackCtx.currentTime;
+      if (nextStartTime < currentTime) {
+        nextStartTime = currentTime + 0.04; 
+      }
+
+      src.start(nextStartTime);
+      nextStartTime += buf.duration; // Flytta fram tidslinjen med paketets längd
     }
   </script>
 </body>
