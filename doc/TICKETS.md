@@ -4,6 +4,6 @@
 Ett renodlat, minimalistiskt testverktyg i en enda fristående HTML-fil (med Vanilla JS, Tailwind CDN och inbyggd AudioWorklet) för att bekräfta att ljudström från NDI Virtual Webcam / vMix samplas till 16 kHz 16-bit PCM och förstås/översätts felfritt av Gemini Live Translate API utan mellanhänder.
 
 ### Del-tickets
-- [ ] **TCK-001**: Etablera arkitektur, domänkontrakt och isolerad implementation av Gemini Live Sanity Check i en enda fristående HTML-vy.
+- [x] **TCK-001**: Etablera arkitektur, domänkontrakt och isolerad implementation av Gemini Live Sanity Check i en enda fristående HTML-vy.
   - *Mål*: Konfiguration (enhetsval, VU-mätare, API-nyckel, avstängd DSP), tvåstegsflöde (Inspelning -> Sändning), WebSocket Bidi-protokoll mot `models/gemini-3.5-live-translate-preview`, återkoppling av text och ljud samt PCM-dump för lokal kvalitetslyssning.
-  - *Status*: Planering (Fas 1)
+  - *Status*: Slutförd (Fas 2)

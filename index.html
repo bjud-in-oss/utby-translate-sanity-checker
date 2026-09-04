@@ -1,18 +1,1407 @@
 <!doctype html>
-<html lang="en">
+<html lang="sv" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-    <meta name="description" content="An application built with Google AI Studio." />
-    <meta property="og:title" content="My Google AI Studio App" />
-    <meta property="og:description" content="An application built with Google AI Studio." />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
+    <title>Gemini Live Audio Sanity Check</title>
+    <meta name="description" content="Fristående Web Audio-applikation för sanitetstest av ljudström från NDI/vMix mot Google Gemini Live Translate API." />
+    <meta property="og:title" content="Gemini Live Audio Sanity Check" />
+    <meta property="og:description" content="Fristående Web Audio-applikation för sanitetstest av ljudström från NDI/vMix mot Google Gemini Live Translate API." />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              studio: {
+                950: '#0b0f17',
+                900: '#111827',
+                850: '#151f32',
+                800: '#1f293d',
+                700: '#334155',
+                accent: '#38bdf8',
+                success: '#10b981',
+                warning: '#f59e0b',
+                danger: '#ef4444',
+              }
+            },
+            fontFamily: {
+              mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Custom scrollbars for logs and panels */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: #0b0f17; }
+      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #475569; }
+      .meter-tick { font-size: 9px; font-family: monospace; }
+    </style>
   </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+  <body class="bg-studio-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-sky-500 selection:text-white pb-16">
+
+    <!-- Top Navigation / Header -->
+    <header class="border-b border-slate-800 bg-studio-900/80 backdrop-blur sticky top-0 z-50">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3z" />
+            </svg>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-base font-semibold text-white tracking-tight">Gemini Live Audio Sanity Check</h1>
+              <span class="px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-sky-500/20 text-sky-300 border border-sky-500/30">v1.0 Standalone</span>
+            </div>
+            <p class="text-xs text-slate-400">Direkt sanitetstest av NDI Virtual Webcam / vMix ljudström mot Google Gemini Live Translate API</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 text-xs">
+          <!-- DSP Status Pill -->
+          <div id="badge-dsp" class="px-2.5 py-1 rounded-md bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 flex items-center gap-1.5 font-mono">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            DSP AVSTÄNGD (Råsignal)
+          </div>
+          <!-- Target Format Pill -->
+          <div class="px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-300 font-mono">
+            16 kHz • 16-bit PCM • Mono
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+      <!-- FÖRKORTAT TESTSYFTE & ISOLERINGSGARANTI -->
+      <div class="rounded-xl border border-sky-900/50 bg-sky-950/20 p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs text-slate-300">
+        <div class="space-y-1">
+          <div class="font-semibold text-sky-300 flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            Isolerat Sanitetstest (Bypass LiveKit, WebRTC-gateways & Cloudflare)
+          </div>
+          <p class="text-slate-400 leading-relaxed">
+            Detta verktyg fångar rått ljud från din NDI/vMix-ingång, resamplar det inline i webbläsaren via AudioWorklet till 16&nbsp;kHz 16-bit PCM Little-Endian, och skickar det i 100 ms-paket direkt till Geminis WebSocket. Tvåstegsflödet (Inspelning &rarr; Sändning) eliminerar rundgång och ekoproblem.
+          </p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-[11px] text-slate-400">Modell:</span>
+          <code class="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-sky-400 font-mono text-[11px]">gemini-3.5-live-translate-preview</code>
+        </div>
+      </div>
+
+      <!-- SEKTION 1: KONFIGURATION & ENHETSVAL -->
+      <section class="rounded-xl border border-slate-800 bg-studio-900/60 p-5 shadow-lg space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-slate-800 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">1</span>
+            <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Konfiguration &amp; Enhetsval</h2>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btn-refresh-devices" type="button" class="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center gap-1.5 border border-slate-700">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              Uppdatera enheter
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <!-- Vänster kolumn: Enhetsval & API-nyckel -->
+          <div class="lg:col-span-7 space-y-4">
+            <div>
+              <label for="device-select" class="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
+                <span>Välj ljudingång (NDI Virtual Webcam / vMix Audio Device)</span>
+                <span id="active-device-stats" class="text-[11px] font-mono text-sky-400"></span>
+              </label>
+              <div class="flex gap-2">
+                <select id="device-select" class="w-full rounded-lg bg-studio-950 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 transition">
+                  <option value="">-- Klicka på 'Aktivera mikrofonåtkomst' för att lista enheter --</option>
+                </select>
+                <button id="btn-toggle-mic" type="button" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium transition shrink-0 flex items-center gap-1.5">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3z" /></svg>
+                  <span id="txt-mic-status">Starta ljudström</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- API-nyckel & Modellinställningar -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label for="api-key-input" class="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span>Gemini API-nyckel</span>
+                  <button id="btn-toggle-key-visibility" type="button" class="text-[10px] text-slate-400 hover:text-white underline">Visa/Dölj</button>
+                </label>
+                <input id="api-key-input" type="password" placeholder="AIzaSy..." class="w-full rounded-lg bg-studio-950 border border-slate-700 px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-sky-500" />
+                <p class="text-[10px] text-slate-500 mt-1">Sparas lokalt i webbläsaren (localStorage).</p>
+              </div>
+
+              <div>
+                <label for="target-lang-select" class="block text-xs font-medium text-slate-300 mb-1.5">Målspråk / Översättningsläge</label>
+                <select id="target-lang-select" class="w-full rounded-lg bg-studio-950 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500">
+                  <option value="sv-to-en">Svenska &rarr; Engelska</option>
+                  <option value="en-to-sv">Engelska &rarr; Svenska</option>
+                  <option value="auto-to-sv">Automatiskt &rarr; Svenska</option>
+                  <option value="auto-to-en">Automatiskt &rarr; Engelska</option>
+                  <option value="verbatim">Ordagrann tolkning (Translate directly)</option>
+                </select>
+                <p class="text-[10px] text-slate-500 mt-1">Styr Gemini Live Translates systeminstruktion.</p>
+              </div>
+            </div>
+
+            <!-- DSP & Audio Parameters Verification Card -->
+            <div class="rounded-lg bg-studio-950/80 border border-slate-800 p-3 grid grid-cols-3 gap-2 text-center font-mono text-[11px]">
+              <div class="border-r border-slate-800/80 pr-2">
+                <span class="text-slate-500 block text-[9px] uppercase">echoCancellation</span>
+                <span class="text-emerald-400 font-semibold">false</span>
+              </div>
+              <div class="border-r border-slate-800/80 pr-2">
+                <span class="text-slate-500 block text-[9px] uppercase">noiseSuppression</span>
+                <span class="text-emerald-400 font-semibold">false</span>
+              </div>
+              <div>
+                <span class="text-slate-500 block text-[9px] uppercase">autoGainControl</span>
+                <span class="text-emerald-400 font-semibold">false</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Höger kolumn: Realtids VU-Meter & Ljudaktivitetskontroll -->
+          <div class="lg:col-span-5 rounded-xl bg-studio-950 border border-slate-800/90 p-4 flex flex-col justify-between space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-slate-600" id="vu-active-dot"></span>
+                Realtids VU-Meter (Input Signal)
+              </span>
+              <span id="vu-db-readout" class="text-xs font-mono font-bold text-slate-400">-&infin; dB</span>
+            </div>
+
+            <!-- VU Canvas Canvas Container -->
+            <div class="relative w-full h-24 bg-slate-950 rounded-lg border border-slate-800 overflow-hidden flex flex-col justify-end p-2">
+              <canvas id="vu-canvas" class="w-full h-full block"></canvas>
+            </div>
+
+            <!-- VU Skala & Förklaring -->
+            <div class="flex justify-between text-[9px] font-mono text-slate-500 px-1">
+              <span>-48dB</span>
+              <span>-36dB</span>
+              <span>-24dB</span>
+              <span>-12dB</span>
+              <span>-6dB</span>
+              <span class="text-amber-500">-3dB</span>
+              <span class="text-red-500">0dB CLIP</span>
+            </div>
+
+            <div class="text-[11px] text-slate-400 bg-slate-900/60 rounded p-2 border border-slate-800/60 flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0"></span>
+              <span id="vu-status-hint">Starta ljudströmmen för att verifiera att din NDI/vMix-ingång sänder ljud.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SEKTION 2 & 3: TVÅSTEGSFLÖDET (INSPELNING -> SÄNDNING) -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- STEG 1: INSPELNING (5-10 SEKUNDER) -->
+        <section class="rounded-xl border border-slate-800 bg-studio-900/60 p-5 shadow-lg flex flex-col justify-between space-y-5">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div class="flex items-center gap-2">
+                <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30 font-mono text-xs flex items-center justify-center font-bold">Steg 1</span>
+                <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Inspelning (5–10 sek)</h2>
+              </div>
+              <span id="rec-timer-badge" class="px-2.5 py-0.5 rounded font-mono text-xs bg-slate-800 border border-slate-700 text-slate-300">00:00.0</span>
+            </div>
+
+            <p class="text-xs text-slate-400">
+              Spela in ett testyttrande (t.ex. räkna 1 till 5 eller säg en mening). Ljudet konverteras i realtid via inline AudioWorklet till <strong>16 000 Hz 16-bit Mono PCM</strong> och buffras i minnet utan medhörning.
+            </p>
+
+            <!-- Inspelningskontroller -->
+            <div class="flex flex-wrap items-center gap-3 pt-2">
+              <button id="btn-record" type="button" class="flex-1 min-w-[200px] py-3 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-medium text-sm transition shadow-lg shadow-red-950/50 flex items-center justify-center gap-2 active:scale-[0.99]">
+                <span id="rec-btn-icon" class="w-3.5 h-3.5 rounded-full bg-white animate-pulse"></span>
+                <span id="rec-btn-text">Starta inspelning</span>
+              </button>
+
+              <select id="auto-stop-select" class="rounded-xl bg-studio-950 border border-slate-700 px-3 py-3 text-xs text-slate-300 focus:outline-none focus:border-sky-500">
+                <option value="5">Auto-stopp efter 5 sek</option>
+                <option value="8" selected>Auto-stopp efter 8 sek</option>
+                <option value="10">Auto-stopp efter 10 sek</option>
+                <option value="0">Manuellt stopp</option>
+              </select>
+            </div>
+
+            <!-- Progress bar för inspelning -->
+            <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+              <div id="rec-progress-bar" class="bg-red-500 h-full transition-all duration-100" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <!-- Buffert-status & Egen PCM-provlyssning -->
+          <div class="rounded-xl bg-studio-950 border border-slate-800/80 p-4 space-y-3">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-medium text-slate-300">Insamlad PCM-buffert:</span>
+              <span id="buffer-stats-text" class="font-mono text-slate-400">0 samples • 0.0 KB</span>
+            </div>
+
+            <!-- EGEN LJUD-DUMP KNAPP & SPELARE -->
+            <div class="pt-1 border-t border-slate-800/60 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div class="space-y-0.5">
+                <span class="text-xs font-semibold text-slate-200 block">Egen ljud-dump (Sanitetstest)</span>
+                <span class="text-[11px] text-slate-400 block">Lyssna på exakt det PCM-ljud som spelades in innan sändning.</span>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <button id="btn-play-own-pcm" type="button" disabled class="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white text-xs font-medium transition border border-slate-700 flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-sky-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>
+                  <span>Spela upp PCM</span>
+                </button>
+                <a id="link-download-wav" href="#" download="sanity-test-input.wav" class="hidden px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition border border-slate-700" title="Ladda ner som WAV">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                </a>
+              </div>
+            </div>
+            <!-- Native Audio Player for Own Dump -->
+            <audio id="audio-own-playback" class="w-full h-8 hidden" controls></audio>
+          </div>
+        </section>
+
+        <!-- STEG 2: SÄNDNING & ÖVERSÄTTNING -->
+        <section class="rounded-xl border border-slate-800 bg-studio-900/60 p-5 shadow-lg flex flex-col justify-between space-y-5">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div class="flex items-center gap-2">
+                <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30 font-mono text-xs flex items-center justify-center font-bold">Steg 2</span>
+                <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Sändning &amp; Översättning</h2>
+              </div>
+              <span id="ws-status-badge" class="px-2.5 py-0.5 rounded font-mono text-xs bg-slate-800 border border-slate-700 text-slate-400">WebSocket: Frånkopplad</span>
+            </div>
+
+            <p class="text-xs text-slate-400">
+              Öppnar en direkt WebSocket-anslutning mot <code>models/gemini-3.5-live-translate-preview</code> och strömmar den sparade PCM-bufferten i paket om ~100 ms (1 600 samples = 3 200 bytes per chunk).
+            </p>
+
+            <!-- Sändningsknapp -->
+            <div class="pt-2">
+              <button id="btn-send-gemini" type="button" disabled class="w-full py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:hover:bg-sky-600 text-white font-medium text-sm transition shadow-lg shadow-sky-950/50 flex items-center justify-center gap-2 active:scale-[0.99]">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+                <span id="send-btn-text">Skicka testsekvens till Gemini Live Translate</span>
+              </button>
+            </div>
+
+            <!-- Sändningsprogress -->
+            <div class="space-y-1.5">
+              <div class="flex justify-between text-xs font-mono text-slate-400">
+                <span id="streaming-label">Sändningsförlopp</span>
+                <span id="streaming-counter">0 / 0 chunks (0%)</span>
+              </div>
+              <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                <div id="streaming-progress-bar" class="bg-sky-500 h-full transition-all duration-75" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gemini Audio Return Player Box -->
+          <div class="rounded-xl bg-studio-950 border border-slate-800/80 p-4 space-y-3">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-slate-200">Geminis Översatta Ljud</span>
+              <span id="gemini-audio-status" class="text-[11px] font-mono text-slate-400">Inget ljud mottaget</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <button id="btn-play-gemini-audio" type="button" disabled class="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 text-white text-xs font-medium transition flex items-center justify-center gap-2">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>
+                <span id="txt-play-gemini">Spela upp översatt ljud</span>
+              </button>
+              <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
+                <input id="chk-auto-play" type="checkbox" checked class="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0" />
+                <span>Auto-play vid mottagande</span>
+              </label>
+            </div>
+            <audio id="audio-gemini-playback" class="w-full h-8 hidden" controls></audio>
+          </div>
+        </section>
+      </div>
+
+      <!-- SEKTION 4: RESULTAT & ÅTERKOPPLING (TEXT-RESPONS) -->
+      <section class="rounded-xl border border-slate-800 bg-studio-900/60 p-5 shadow-lg space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-slate-800 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">3</span>
+            <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Resultat &amp; Återkoppling</h2>
+          </div>
+          <span id="translation-latency-badge" class="text-xs font-mono text-slate-400"></span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Vänster: Vad Gemini hörde -->
+          <div class="rounded-xl bg-studio-950 border border-slate-800 p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3z" /></svg>
+                Vad Gemini Hörde (Input Transcript)
+              </span>
+              <span id="tag-transcript-status" class="text-[10px] font-mono text-slate-500">Väntar på ljud</span>
+            </div>
+            <div id="transcript-box" class="h-28 overflow-y-auto rounded-lg bg-slate-900/50 border border-slate-800/80 p-3 text-xs text-slate-200 font-sans leading-relaxed whitespace-pre-wrap">
+              <span class="text-slate-500 italic">Transkription visas här när Gemini bearbetar ljudströmmen...</span>
+            </div>
+          </div>
+
+          <!-- Höger: Översatt text -->
+          <div class="rounded-xl bg-studio-950 border border-slate-800 p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                Översatt Text (Gemini Output)
+              </span>
+              <span id="tag-translation-status" class="text-[10px] font-mono text-slate-500">Väntar på översättning</span>
+            </div>
+            <div id="translation-box" class="h-28 overflow-y-auto rounded-lg bg-slate-900/50 border border-slate-800/80 p-3 text-xs text-emerald-300 font-sans leading-relaxed whitespace-pre-wrap">
+              <span class="text-slate-500 italic">Översättningen visas här i realtid...</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SEKTION 5: REAL-TIME DIAGNOSTIK & WEBSOCKET LOGG -->
+      <section class="rounded-xl border border-slate-800 bg-studio-900/60 p-5 shadow-lg space-y-3">
+        <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            <h2 class="text-xs font-semibold text-white uppercase tracking-wider">Diagnostik &amp; WebSocket Protokollogg</h2>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btn-copy-log" type="button" class="text-[11px] px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">Kopiera logg</button>
+            <button id="btn-clear-log" type="button" class="text-[11px] px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">Rensa</button>
+          </div>
+        </div>
+
+        <div id="log-terminal" class="h-44 overflow-y-auto rounded-lg bg-studio-950 border border-slate-800 p-3 font-mono text-[11px] space-y-1 select-text">
+          <div class="text-slate-500">[System redo] Välj din NDI/vMix-ljudenhet och verifiera att VU-mätaren rör sig.</div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- INLINE AUDIOWORKLET OCH VANILLA JS LOGIK -->
+    <script>
+      (function() {
+        'use strict';
+
+        // --- GLOBAL STATE ---
+        const state = {
+          apiKey: localStorage.getItem('gemini_api_key') || '',
+          selectedDeviceId: localStorage.getItem('gemini_audio_device_id') || '',
+          audioContext: null,
+          mediaStream: null,
+          analyserNode: null,
+          workletNode: null,
+          workletBlobUrl: null,
+          isMonitoringMic: false,
+          isRecording: false,
+          recordingStartTime: 0,
+          recordingTimerInterval: null,
+          recordedChunks: [], // Array av Int16Array
+          totalRecordedSamples: 0,
+          fullRecordedPcm16: null,
+          ownWavBlobUrl: null,
+          // WebSocket & Gemini state
+          webSocket: null,
+          isStreaming: false,
+          modelResponseText: '',
+          userTranscriptText: '',
+          receivedAudioChunks: [], // Array of ArrayBuffer / Uint8Array
+          fullReceivedAudioBuffer: null,
+          geminiAudioBlobUrl: null,
+        };
+
+        // --- DOM REFERENCES ---
+        const deviceSelect = document.getElementById('device-select');
+        const btnRefreshDevices = document.getElementById('btn-refresh-devices');
+        const btnToggleMic = document.getElementById('btn-toggle-mic');
+        const txtMicStatus = document.getElementById('txt-mic-status');
+        const activeDeviceStats = document.getElementById('active-device-stats');
+        const vuActiveDot = document.getElementById('vu-active-dot');
+        const vuDbReadout = document.getElementById('vu-db-readout');
+        const vuStatusHint = document.getElementById('vu-status-hint');
+        const vuCanvas = document.getElementById('vu-canvas');
+        const vuCtx = vuCanvas.getContext('2d');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const btnToggleKeyVisibility = document.getElementById('btn-toggle-key-visibility');
+        const targetLangSelect = document.getElementById('target-lang-select');
+        const btnRecord = document.getElementById('btn-record');
+        const recBtnText = document.getElementById('rec-btn-text');
+        const recBtnIcon = document.getElementById('rec-btn-icon');
+        const recTimerBadge = document.getElementById('rec-timer-badge');
+        const recProgressBar = document.getElementById('rec-progress-bar');
+        const autoStopSelect = document.getElementById('auto-stop-select');
+        const bufferStatsText = document.getElementById('buffer-stats-text');
+        const btnPlayOwnPcm = document.getElementById('btn-play-own-pcm');
+        const linkDownloadWav = document.getElementById('link-download-wav');
+        const audioOwnPlayback = document.getElementById('audio-own-playback');
+        const btnSendGemini = document.getElementById('btn-send-gemini');
+        const sendBtnText = document.getElementById('send-btn-text');
+        const wsStatusBadge = document.getElementById('ws-status-badge');
+        const streamingCounter = document.getElementById('streaming-counter');
+        const streamingProgressBar = document.getElementById('streaming-progress-bar');
+        const streamingLabel = document.getElementById('streaming-label');
+        const transcriptBox = document.getElementById('transcript-box');
+        const translationBox = document.getElementById('translation-box');
+        const tagTranscriptStatus = document.getElementById('tag-transcript-status');
+        const tagTranslationStatus = document.getElementById('tag-translation-status');
+        const btnPlayGeminiAudio = document.getElementById('btn-play-gemini-audio');
+        const txtPlayGemini = document.getElementById('txt-play-gemini');
+        const geminiAudioStatus = document.getElementById('gemini-audio-status');
+        const audioGeminiPlayback = document.getElementById('audio-gemini-playback');
+        const chkAutoPlay = document.getElementById('chk-auto-play');
+        const logTerminal = document.getElementById('log-terminal');
+        const btnClearLog = document.getElementById('btn-clear-log');
+        const btnCopyLog = document.getElementById('btn-copy-log');
+
+        // --- LOGGER ---
+        function log(message, type = 'info') {
+          const timestamp = new Date().toLocaleTimeString('sv-SE', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+          const row = document.createElement('div');
+          let colorClass = 'text-slate-300';
+          if (type === 'error') colorClass = 'text-red-400 font-semibold';
+          if (type === 'success') colorClass = 'text-emerald-400 font-semibold';
+          if (type === 'warn') colorClass = 'text-amber-400';
+          if (type === 'ws') colorClass = 'text-sky-400';
+
+          row.className = `flex gap-2 leading-tight ${colorClass}`;
+          row.innerHTML = `<span class="text-slate-500 shrink-0">[${timestamp}]</span> <span>${escapeHtml(message)}</span>`;
+          logTerminal.appendChild(row);
+          logTerminal.scrollTop = logTerminal.scrollHeight;
+        }
+
+        function escapeHtml(str) {
+          return String(str).replace(/[&<>"']/g, function(m) {
+            switch (m) {
+              case '&': return '&amp;';
+              case '<': return '&lt;';
+              case '>': return '&gt;';
+              case '"': return '&quot;';
+              case "'": return '&#39;';
+            }
+          });
+        }
+
+        // --- INITIALIZE API KEY ---
+        if (state.apiKey) {
+          apiKeyInput.value = state.apiKey;
+        }
+        apiKeyInput.addEventListener('input', (e) => {
+          state.apiKey = e.target.value.trim();
+          localStorage.setItem('gemini_api_key', state.apiKey);
+        });
+        btnToggleKeyVisibility.addEventListener('click', () => {
+          apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
+        });
+
+        // --- INLINE AUDIOWORKLET CREATOR ---
+        // Skapar en inline AudioWorklet via en Blob. Den resamplar inkommande ljud
+        // till exakt 16 000 Hz och kvantiserar till 16-bit PCM Little-Endian int16.
+        function createInlineWorkletBlob() {
+          if (state.workletBlobUrl) return state.workletBlobUrl;
+          const workletCode = `
+            class PCMRecorderProcessor extends AudioWorkletProcessor {
+              constructor() {
+                super();
+                this.targetSampleRate = 16000;
+                this.sourceIndex = 0;
+                this.lastSample = 0;
+              }
+
+              process(inputs, outputs, parameters) {
+                const input = inputs[0];
+                if (!input || !input[0] || input[0].length === 0) return true;
+                const inputChannel = input[0];
+                const srcRate = sampleRate; // Web Audio standard global
+                const tgtRate = this.targetSampleRate;
+                const step = srcRate / tgtRate;
+
+                const outputSamples = [];
+                while (this.sourceIndex < inputChannel.length) {
+                  const idx = Math.floor(this.sourceIndex);
+                  const frac = this.sourceIndex - idx;
+                  const s0 = idx < inputChannel.length ? inputChannel[idx] : this.lastSample;
+                  const s1 = (idx + 1) < inputChannel.length ? inputChannel[idx + 1] : s0;
+                  const interpolated = s0 + frac * (s1 - s0);
+
+                  // Kvantisera Float32 [-1.0, 1.0] till Signed Int16 [-32768, 32767]
+                  const clamped = Math.max(-1, Math.min(1, interpolated));
+                  const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+                  outputSamples.push(Math.round(int16));
+
+                  this.sourceIndex += step;
+                }
+                this.sourceIndex -= inputChannel.length;
+                this.lastSample = inputChannel[inputChannel.length - 1];
+
+                if (outputSamples.length > 0) {
+                  const pcm16 = new Int16Array(outputSamples);
+                  this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+                }
+                return true;
+              }
+            }
+            registerProcessor('pcm-recorder-processor', PCMRecorderProcessor);
+          `;
+          const blob = new Blob([workletCode], { type: 'application/javascript' });
+          state.workletBlobUrl = URL.createObjectURL(blob);
+          return state.workletBlobUrl;
+        }
+
+        // --- ENUMERATE AUDIO DEVICES ---
+        async function enumerateAudioDevices() {
+          try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+              log('Webbläsaren stöder inte navigator.mediaDevices.enumerateDevices.', 'error');
+              return;
+            }
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(d => d.kind === 'audioinput');
+
+            deviceSelect.innerHTML = '';
+            if (audioInputs.length === 0) {
+              const opt = document.createElement('option');
+              opt.value = '';
+              opt.textContent = 'Inga ljudingångar hittades (Kräver behörighet)';
+              deviceSelect.appendChild(opt);
+              return;
+            }
+
+            audioInputs.forEach((device, idx) => {
+              const opt = document.createElement('option');
+              opt.value = device.deviceId;
+              const isNDI = /ndi|vmix|virtual|cable|broadcast/i.test(device.label);
+              const label = device.label || `Ljudenhet ${idx + 1} (${device.deviceId.slice(0, 8)}...)`;
+              opt.textContent = (isNDI ? '★ [NDI/vMix] ' : '') + label;
+              if (device.deviceId === state.selectedDeviceId) {
+                opt.selected = true;
+              }
+              deviceSelect.appendChild(opt);
+            });
+
+            if (!state.selectedDeviceId && audioInputs.length > 0) {
+              // Försök auto-välja NDI om den finns
+              const ndiDevice = audioInputs.find(d => /ndi|vmix/i.test(d.label));
+              if (ndiDevice) {
+                state.selectedDeviceId = ndiDevice.deviceId;
+                deviceSelect.value = ndiDevice.deviceId;
+                log(`Hittade och förvalde NDI/vMix-ingång: ${ndiDevice.label}`, 'success');
+              } else {
+                state.selectedDeviceId = audioInputs[0].deviceId;
+                deviceSelect.value = audioInputs[0].deviceId;
+              }
+              localStorage.setItem('gemini_audio_device_id', state.selectedDeviceId);
+            }
+            log(`Enhetslista uppdaterad: ${audioInputs.length} ljudingång(ar) tillgängliga.`, 'info');
+          } catch (err) {
+            log(`Kunde inte lista ljudenheter: ${err.message}`, 'error');
+          }
+        }
+
+        btnRefreshDevices.addEventListener('click', () => {
+          enumerateAudioDevices();
+        });
+
+        deviceSelect.addEventListener('change', (e) => {
+          state.selectedDeviceId = e.target.value;
+          localStorage.setItem('gemini_audio_device_id', state.selectedDeviceId);
+          log(`Vald ljudenhet ändrad.`, 'info');
+          if (state.isMonitoringMic) {
+            // Starta om strömmen med nya enheten
+            startAudioStream();
+          }
+        });
+
+        // --- START / STOP AUDIO MONITORING & VU METER ---
+        async function startAudioStream() {
+          stopAudioStream();
+
+          try {
+            log('Begär åtkomst till mediastream med alla DSP-funktioner strikt AVSTÄNGDA...', 'info');
+
+            const constraints = {
+              audio: {
+                deviceId: state.selectedDeviceId ? { exact: state.selectedDeviceId } : undefined,
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                channelCount: 1,
+              }
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            state.mediaStream = stream;
+
+            const audioTrack = stream.getAudioTracks()[0];
+            const settings = audioTrack.getSettings ? audioTrack.getSettings() : {};
+            const appliedLabel = audioTrack.label || 'Standardmikrofon';
+            log(`Ljudström ansluten: "${appliedLabel}"`, 'success');
+            log(`Applicerade inställningar: sampleRate=${settings.sampleRate || 'auto'}, echoCancellation=${settings.echoCancellation ?? false}, noiseSuppression=${settings.noiseSuppression ?? false}`, 'info');
+            activeDeviceStats.textContent = `${appliedLabel.slice(0, 30)} (${settings.sampleRate || 48000} Hz)`;
+
+            // AudioContext
+            state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (state.audioContext.state === 'suspended') {
+              await state.audioContext.resume();
+            }
+
+            // AnalyserNode för VU-mätare
+            const source = state.audioContext.createMediaStreamSource(stream);
+            const analyser = state.audioContext.createAnalyser();
+            analyser.fftSize = 512;
+            analyser.smoothingTimeConstant = 0.2;
+            source.connect(analyser);
+            // VIKTIGT: Koppla INTE analyser till destination (högtalare) för att undvika medhörning och rundgång!
+
+            state.analyserNode = analyser;
+            state.isMonitoringMic = true;
+
+            txtMicStatus.textContent = 'Stoppa ström';
+            btnToggleMic.className = 'px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium transition shrink-0 flex items-center gap-1.5';
+            vuActiveDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+            vuStatusHint.textContent = `Aktiv ljudström från ${appliedLabel}. Kontrollera att VU-mätaren rör sig när ljud skickas.`;
+
+            // Starta ritning av VU-mätare
+            startVUMeterLoop();
+            // Uppdatera enhetslistan ifall labels tidigare saknades
+            enumerateAudioDevices();
+          } catch (err) {
+            log(`Fel vid start av ljudström: ${err.name} - ${err.message}`, 'error');
+            vuStatusHint.textContent = `Kunde inte starta ljudström: ${err.message}`;
+          }
+        }
+
+        function stopAudioStream() {
+          if (state.isRecording) {
+            stopRecording();
+          }
+          if (state.mediaStream) {
+            state.mediaStream.getTracks().forEach(t => t.stop());
+            state.mediaStream = null;
+          }
+          if (state.audioContext) {
+            state.audioContext.close().catch(() => {});
+            state.audioContext = null;
+          }
+          state.analyserNode = null;
+          state.isMonitoringMic = false;
+
+          txtMicStatus.textContent = 'Starta ljudström';
+          btnToggleMic.className = 'px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium transition shrink-0 flex items-center gap-1.5';
+          vuActiveDot.className = 'w-2 h-2 rounded-full bg-slate-600';
+          vuDbReadout.textContent = '-∞ dB';
+          vuDbReadout.className = 'text-xs font-mono font-bold text-slate-400';
+          drawIdleVUMeter();
+        }
+
+        btnToggleMic.addEventListener('click', () => {
+          if (state.isMonitoringMic) {
+            stopAudioStream();
+          } else {
+            startAudioStream();
+          }
+        });
+
+        // --- VU METER RENDERING ---
+        let vuAnimationId = null;
+
+        function startVUMeterLoop() {
+          if (vuAnimationId) cancelAnimationFrame(vuAnimationId);
+
+          const dataArray = new Float32Array(state.analyserNode.fftSize);
+
+          function render() {
+            if (!state.isMonitoringMic || !state.analyserNode) {
+              drawIdleVUMeter();
+              return;
+            }
+
+            state.analyserNode.getFloatTimeDomainData(dataArray);
+
+            // Beräkna RMS och Peak
+            let sumSquares = 0;
+            let peak = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              const val = dataArray[i];
+              const absVal = Math.abs(val);
+              if (absVal > peak) peak = absVal;
+              sumSquares += val * val;
+            }
+            const rms = Math.sqrt(sumSquares / dataArray.length);
+
+            // Konvertera till dB
+            const dbRms = rms > 0.00001 ? 20 * Math.log10(rms) : -80;
+            const dbPeak = peak > 0.00001 ? 20 * Math.log10(peak) : -80;
+
+            // Rita Canvas
+            drawVUBar(dbRms, dbPeak);
+
+            // Uppdatera dB-text
+            if (dbRms < -60) {
+              vuDbReadout.textContent = '-∞ dB';
+              vuDbReadout.className = 'text-xs font-mono font-bold text-slate-500';
+            } else {
+              vuDbReadout.textContent = `${dbRms.toFixed(1)} dB (Peak: ${dbPeak.toFixed(1)})`;
+              if (dbPeak > -0.5) {
+                vuDbReadout.className = 'text-xs font-mono font-bold text-red-400 animate-pulse';
+              } else if (dbPeak > -6) {
+                vuDbReadout.className = 'text-xs font-mono font-bold text-amber-400';
+              } else {
+                vuDbReadout.className = 'text-xs font-mono font-bold text-emerald-400';
+              }
+            }
+
+            vuAnimationId = requestAnimationFrame(render);
+          }
+
+          render();
+        }
+
+        function drawIdleVUMeter() {
+          const w = vuCanvas.width = vuCanvas.parentElement.clientWidth;
+          const h = vuCanvas.height = vuCanvas.parentElement.clientHeight;
+          vuCtx.fillStyle = '#090d16';
+          vuCtx.fillRect(0, 0, w, h);
+
+          // Grid lines
+          vuCtx.strokeStyle = '#1e293b';
+          vuCtx.lineWidth = 1;
+          for (let x = 0; x < w; x += w / 8) {
+            vuCtx.beginPath();
+            vuCtx.moveTo(x, 0);
+            vuCtx.lineTo(x, h);
+            vuCtx.stroke();
+          }
+
+          vuCtx.fillStyle = '#475569';
+          vuCtx.font = '10px monospace';
+          vuCtx.textAlign = 'center';
+          vuCtx.fillText('INGEN SIGNAL (LJUDSTRÖM STOPPAD)', w / 2, h / 2 + 3);
+        }
+
+        function drawVUBar(dbRms, dbPeak) {
+          const w = vuCanvas.width = vuCanvas.parentElement.clientWidth;
+          const h = vuCanvas.height = vuCanvas.parentElement.clientHeight;
+
+          vuCtx.fillStyle = '#090d16';
+          vuCtx.fillRect(0, 0, w, h);
+
+          // Skala från -48 dB (0%) till 0 dB (100%)
+          const minDb = -48;
+          const maxDb = 0;
+          const normRms = Math.max(0, Math.min(1, (dbRms - minDb) / (maxDb - minDb)));
+          const normPeak = Math.max(0, Math.min(1, (dbPeak - minDb) / (maxDb - minDb)));
+
+          const barWidth = w * normRms;
+          const peakX = w * normPeak;
+
+          // Skapa gradient: Grön (-48 till -12) -> Gul (-12 till -3) -> Röd (-3 till 0)
+          const grad = vuCtx.createLinearGradient(0, 0, w, 0);
+          grad.addColorStop(0, '#10b981');
+          grad.addColorStop(0.75, '#10b981');
+          grad.addColorStop(0.85, '#f59e0b');
+          grad.addColorStop(0.96, '#ef4444');
+          grad.addColorStop(1.0, '#dc2626');
+
+          // Rita RMS Bar
+          vuCtx.fillStyle = grad;
+          vuCtx.fillRect(0, 8, barWidth, h - 16);
+
+          // Rita Peak Streck
+          if (normPeak > 0.02) {
+            vuCtx.fillStyle = normPeak >= 0.98 ? '#ff0000' : '#ffffff';
+            vuCtx.fillRect(Math.max(0, peakX - 2), 4, 3, h - 8);
+          }
+
+          // Grid ticks
+          vuCtx.fillStyle = '#334155';
+          const ticks = [-48, -36, -24, -12, -6, -3, 0];
+          ticks.forEach(t => {
+            const x = w * ((t - minDb) / (maxDb - minDb));
+            vuCtx.fillRect(x, 0, 1, h);
+          });
+        }
+
+        // --- STEG 1: INSPELNING TILL 16 kHz 16-bit PCM ---
+        async function startRecording() {
+          if (!state.isMonitoringMic || !state.mediaStream || !state.audioContext) {
+            await startAudioStream();
+            if (!state.isMonitoringMic) return;
+          }
+
+          try {
+            log('Initierar AudioWorklet för inspelning till 16 000 Hz 16-bit Mono PCM...', 'info');
+            const workletUrl = createInlineWorkletBlob();
+            await state.audioContext.audioWorklet.addModule(workletUrl);
+
+            const source = state.audioContext.createMediaStreamSource(state.mediaStream);
+            const workletNode = new AudioWorkletNode(state.audioContext, 'pcm-recorder-processor');
+
+            state.recordedChunks = [];
+            state.totalRecordedSamples = 0;
+            state.fullRecordedPcm16 = null;
+
+            workletNode.port.onmessage = (event) => {
+              if (!state.isRecording) return;
+              const chunk16 = new Int16Array(event.data);
+              state.recordedChunks.push(chunk16);
+              state.totalRecordedSamples += chunk16.length;
+
+              // Uppdatera buffertindikator
+              const totalBytes = state.totalRecordedSamples * 2;
+              const seconds = (state.totalRecordedSamples / 16000).toFixed(1);
+              bufferStatsText.textContent = `${state.totalRecordedSamples.toLocaleString()} samples • ${(totalBytes / 1024).toFixed(1)} KB (${seconds}s)`;
+            };
+
+            source.connect(workletNode);
+            // VIKTIGT: workletNode kopplas INTE till audioContext.destination (ingen medhörning).
+
+            state.workletNode = workletNode;
+            state.isRecording = true;
+            state.recordingStartTime = performance.now();
+
+            // UI-uppdateringar
+            recBtnText.textContent = 'Stoppa inspelning';
+            recBtnIcon.className = 'w-3.5 h-3.5 rounded bg-white';
+            btnRecord.className = 'flex-1 min-w-[200px] py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium text-sm transition shadow-lg border border-red-500/50 flex items-center justify-center gap-2';
+
+            btnSendGemini.disabled = true;
+            btnPlayOwnPcm.disabled = true;
+            linkDownloadWav.classList.add('hidden');
+
+            const autoStopSec = parseFloat(autoStopSelect.value);
+
+            // Timer-loop
+            state.recordingTimerInterval = setInterval(() => {
+              const elapsedSec = (performance.now() - state.recordingStartTime) / 1000;
+              const mins = Math.floor(elapsedSec / 60);
+              const secs = Math.floor(elapsedSec % 60);
+              const tenths = Math.floor((elapsedSec * 10) % 10);
+              recTimerBadge.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${tenths}`;
+
+              if (autoStopSec > 0) {
+                const pct = Math.min(100, (elapsedSec / autoStopSec) * 100);
+                recProgressBar.style.width = `${pct}%`;
+                if (elapsedSec >= autoStopSec) {
+                  log(`Auto-stopp uppnått (${autoStopSec} sekunder).`, 'info');
+                  stopRecording();
+                }
+              } else {
+                recProgressBar.style.width = '100%';
+              }
+            }, 50);
+
+            log('🔴 Inspelning startad (16 kHz PCM samlas i minnet)...', 'warn');
+          } catch (err) {
+            log(`Kunde inte starta inspelning: ${err.message}`, 'error');
+          }
+        }
+
+        function stopRecording() {
+          if (!state.isRecording) return;
+          state.isRecording = false;
+
+          if (state.recordingTimerInterval) {
+            clearInterval(state.recordingTimerInterval);
+            state.recordingTimerInterval = null;
+          }
+
+          if (state.workletNode) {
+            state.workletNode.disconnect();
+            state.workletNode = null;
+          }
+
+          // UI återställning
+          recBtnText.textContent = 'Starta inspelning';
+          recBtnIcon.className = 'w-3.5 h-3.5 rounded-full bg-white animate-pulse';
+          btnRecord.className = 'flex-1 min-w-[200px] py-3 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-medium text-sm transition shadow-lg shadow-red-950/50 flex items-center justify-center gap-2';
+          recProgressBar.style.width = '0%';
+
+          // Sammanfoga alla insamlade Int16Array chunks till en enda sammanhängande buffert
+          const merged = new Int16Array(state.totalRecordedSamples);
+          let offset = 0;
+          for (let i = 0; i < state.recordedChunks.length; i++) {
+            merged.set(state.recordedChunks[i], offset);
+            offset += state.recordedChunks[i].length;
+          }
+          state.fullRecordedPcm16 = merged;
+
+          const totalBytes = merged.byteLength;
+          const totalDuration = (merged.length / 16000).toFixed(2);
+          log(`Inspelning slutförd! Samlade ${merged.length.toLocaleString()} samples (${(totalBytes / 1024).toFixed(1)} KB, ${totalDuration}s) i 16 kHz Mono 16-bit PCM.`, 'success');
+
+          // Generera WAV Blob för lokal provlyssning
+          generateOwnWavBlob(merged);
+
+          // Aktivera sändningsknapp
+          btnSendGemini.disabled = false;
+          btnPlayOwnPcm.disabled = false;
+        }
+
+        btnRecord.addEventListener('click', () => {
+          if (state.isRecording) {
+            stopRecording();
+          } else {
+            startRecording();
+          }
+        });
+
+        // --- WAV BLOB GENERATOR (FÖR EGEN LJUD-DUMP) ---
+        function generateOwnWavBlob(int16Array) {
+          if (state.ownWavBlobUrl) {
+            URL.revokeObjectURL(state.ownWavBlobUrl);
+          }
+
+          const byteLength = int16Array.length * 2;
+          const buffer = new ArrayBuffer(44 + byteLength);
+          const view = new DataView(buffer);
+
+          function writeString(offset, string) {
+            for (let i = 0; i < string.length; i++) {
+              view.setUint8(offset + i, string.charCodeAt(i));
+            }
+          }
+
+          // RIFF Header
+          writeString(0, 'RIFF');
+          view.setUint32(4, 36 + byteLength, true);
+          writeString(8, 'WAVE');
+          // fmt Subchunk
+          writeString(12, 'fmt ');
+          view.setUint32(16, 16, true);
+          view.setUint16(20, 1, true); // Linear PCM
+          view.setUint16(22, 1, true); // Mono (1 channel)
+          view.setUint32(24, 16000, true); // 16 000 Hz
+          view.setUint32(28, 16000 * 1 * 2, true); // Byte rate (32 000 B/s)
+          view.setUint16(32, 2, true); // Block align (1 * 16/8)
+          view.setUint16(34, 16, true); // 16 bits per sample
+          // data Subchunk
+          writeString(36, 'data');
+          view.setUint32(40, byteLength, true);
+
+          // Skriv PCM data
+          const pcmU8 = new Uint8Array(int16Array.buffer, int16Array.byteOffset, int16Array.byteLength);
+          const destU8 = new Uint8Array(buffer, 44);
+          destU8.set(pcmU8);
+
+          const blob = new Blob([buffer], { type: 'audio/wav' });
+          state.ownWavBlobUrl = URL.createObjectURL(blob);
+
+          audioOwnPlayback.src = state.ownWavBlobUrl;
+          linkDownloadWav.href = state.ownWavBlobUrl;
+          linkDownloadWav.classList.remove('hidden');
+
+          log(`WAV-fil skapad för egen provlyssning (${(blob.size / 1024).toFixed(1)} KB).`, 'info');
+        }
+
+        btnPlayOwnPcm.addEventListener('click', () => {
+          if (!state.ownWavBlobUrl) return;
+          audioOwnPlayback.currentTime = 0;
+          audioOwnPlayback.play().catch(e => log(`Uppspelningsfel: ${e.message}`, 'error'));
+          log('Spelar upp egen insamlad 16 kHz PCM-inspelning...', 'info');
+        });
+
+        // --- STEG 2: SÄNDNING & ÖVERSÄTTNING MOT GEMINI LIVE API ---
+        function getSystemInstructionForSelectedLanguage() {
+          const mode = targetLangSelect.value;
+          let instruction = "You are a real-time speech translation assistant. Translate the spoken input directly, maintaining natural tone. Output both transcribed audio and translated text.";
+          if (mode === 'sv-to-en') {
+            instruction = "You are a real-time speech translator. Listen to the Swedish audio, transcribe what was said, and translate it fluently into English. Return both audio and text.";
+          } else if (mode === 'en-to-sv') {
+            instruction = "You are a real-time speech translator. Listen to the English audio, transcribe what was said, and translate it fluently into Swedish. Return both audio and text.";
+          } else if (mode === 'auto-to-sv') {
+            instruction = "You are a real-time speech translator. Listen to the spoken audio and translate it fluently into Swedish. Return both audio and text.";
+          } else if (mode === 'auto-to-en') {
+            instruction = "You are a real-time speech translator. Listen to the spoken audio and translate it fluently into English. Return both audio and text.";
+          } else if (mode === 'verbatim') {
+            instruction = "You are an accurate verbatim speech translator. Translate spoken audio immediately and faithfully into the opposite language (Swedish <-> English). Return both audio and text.";
+          }
+          return instruction;
+        }
+
+        async function sendPcmToGeminiLive() {
+          if (!state.apiKey) {
+            log('FELLARM: Ange en Gemini API-nyckel i fältet ovan!', 'error');
+            apiKeyInput.focus();
+            return;
+          }
+
+          if (!state.fullRecordedPcm16 || state.fullRecordedPcm16.length === 0) {
+            log('FELLARM: Ingen PCM-data har spelats in än. Genomför Steg 1 först!', 'error');
+            return;
+          }
+
+          if (state.isStreaming) {
+            log('En sändning pågår redan!', 'warn');
+            return;
+          }
+
+          state.isStreaming = true;
+          btnSendGemini.disabled = true;
+          sendBtnText.textContent = 'Ansluter till Gemini Live WebSocket...';
+          wsStatusBadge.textContent = 'WebSocket: Ansluter...';
+          wsStatusBadge.className = 'px-2.5 py-0.5 rounded font-mono text-xs bg-amber-950/60 border border-amber-500/40 text-amber-300';
+
+          // Rensa tidigare resultat
+          state.modelResponseText = '';
+          state.userTranscriptText = '';
+          state.receivedAudioChunks = [];
+          state.fullReceivedAudioBuffer = null;
+          transcriptBox.innerHTML = '<span class="text-slate-500 italic">Väntar på transkribering från Gemini...</span>';
+          translationBox.innerHTML = '<span class="text-slate-500 italic">Väntar på översättning från Gemini...</span>';
+          tagTranscriptStatus.textContent = 'Bearbetar...';
+          tagTranslationStatus.textContent = 'Bearbetar...';
+          btnPlayGeminiAudio.disabled = true;
+          geminiAudioStatus.textContent = 'Väntar på svarsström...';
+
+          const modelName = 'models/gemini-3.5-live-translate-preview';
+          const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(state.apiKey)}`;
+
+          log(`Initierar WebSocket mot Gemini Multimodal Live API (${modelName})...`, 'ws');
+
+          let ws;
+          try {
+            ws = new WebSocket(wsUrl);
+            state.webSocket = ws;
+          } catch (err) {
+            log(`Kunde inte skapa WebSocket: ${err.message}`, 'error');
+            resetStreamingUI();
+            return;
+          }
+
+          const sendStartTime = performance.now();
+
+          ws.onopen = () => {
+            log('WebSocket ansluten mot Google Generative Service!', 'success');
+            wsStatusBadge.textContent = 'WebSocket: Ansluten (Skickar Setup)';
+            wsStatusBadge.className = 'px-2.5 py-0.5 rounded font-mono text-xs bg-emerald-950/60 border border-emerald-500/40 text-emerald-300';
+
+            // Skicka Setup Payload
+            const setupPayload = {
+              setup: {
+                model: modelName,
+                generationConfig: {
+                  responseModalities: ["AUDIO", "TEXT"],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: {
+                        voiceName: "Puck"
+                      }
+                    }
+                  }
+                },
+                systemInstruction: {
+                  parts: [
+                    { text: getSystemInstructionForSelectedLanguage() }
+                  ]
+                }
+              }
+            };
+
+            log(`Skickar Setup-meddelande för modell "${modelName}"...`, 'ws');
+            ws.send(JSON.stringify(setupPayload));
+
+            // Påbörja strömning av PCM-datan i paket om ~100 ms (1 600 samples = 3 200 bytes)
+            streamPcmChunks(ws);
+          };
+
+          ws.onmessage = async (event) => {
+            try {
+              let msgData = event.data;
+              if (msgData instanceof Blob) {
+                msgData = await msgData.text();
+              }
+              const response = JSON.parse(msgData);
+              handleGeminiServerMessage(response);
+            } catch (err) {
+              log(`Fel vid tolkning av WebSocket-meddelande: ${err.message}`, 'error');
+            }
+          };
+
+          ws.onerror = (event) => {
+            log('WebSocket fel inträffade. Kontrollera din API-nyckel och nätverksåtkomst.', 'error');
+            wsStatusBadge.textContent = 'WebSocket: Fel';
+            wsStatusBadge.className = 'px-2.5 py-0.5 rounded font-mono text-xs bg-red-950/60 border border-red-500/40 text-red-300';
+          };
+
+          ws.onclose = (event) => {
+            const elapsed = ((performance.now() - sendStartTime) / 1000).toFixed(2);
+            log(`WebSocket stängdes (kod: ${event.code}, orsak: "${event.reason || 'Ingen'}", tid: ${elapsed}s)`, event.code === 1000 ? 'info' : 'warn');
+            resetStreamingUI();
+          };
+        }
+
+        // Strömma 16 kHz PCM bufferten i ~100 ms paket (1600 samples per chunk)
+        async function streamPcmChunks(ws) {
+          const pcmData = state.fullRecordedPcm16;
+          const chunkSize = 1600; // 1 600 samples = 100 ms vid 16 000 Hz
+          const totalChunks = Math.ceil(pcmData.length / chunkSize);
+
+          streamingLabel.textContent = 'Strömmar PCM-paket';
+          sendBtnText.textContent = `Strömmar PCM (0/${totalChunks})...`;
+
+          log(`Påbörjar strömning av ${pcmData.length} samples uppdelat på ${totalChunks} st 100ms-chunks...`, 'ws');
+
+          for (let i = 0; i < totalChunks; i++) {
+            if (!state.isStreaming || ws.readyState !== WebSocket.OPEN) {
+              log('Strömning avbruten i förtid.', 'warn');
+              return;
+            }
+
+            const startIdx = i * chunkSize;
+            const endIdx = Math.min(pcmData.length, startIdx + chunkSize);
+            const chunkSlice = pcmData.subarray(startIdx, endIdx);
+
+            // Konvertera Int16 till Base64
+            const base64Audio = int16ToBase64(chunkSlice);
+
+            const realtimePayload = {
+              realtimeInput: {
+                mediaChunks: [
+                  {
+                    mimeType: "audio/pcm;rate=16000",
+                    data: base64Audio
+                  }
+                ]
+              }
+            };
+
+            ws.send(JSON.stringify(realtimePayload));
+
+            // Uppdatera UI progress
+            const currentChunk = i + 1;
+            const pct = Math.round((currentChunk / totalChunks) * 100);
+            streamingProgressBar.style.width = `${pct}%`;
+            streamingCounter.textContent = `${currentChunk} / ${totalChunks} chunks (${pct}%)`;
+
+            // Vänta 80-100 ms mellan paket för realistisk realtidsströmning
+            await new Promise(r => setTimeout(r, 80));
+          }
+
+          log(`Alla ${totalChunks} PCM-chunks har skickats till Gemini Live. Skickar turnComplete signal...`, 'success');
+          sendBtnText.textContent = 'Väntar på Geminis svar...';
+          streamingLabel.textContent = 'Sändning klar • Väntar på respons';
+
+          // Skicka turnComplete
+          if (ws.readyState === WebSocket.OPEN) {
+            const turnCompletePayload = {
+              clientContent: {
+                turns: [],
+                turnComplete: true
+              }
+            };
+            ws.send(JSON.stringify(turnCompletePayload));
+          }
+        }
+
+        // Hantera meddelanden från Gemini Live Translate API
+        function handleGeminiServerMessage(msg) {
+          // Logga intressanta headers
+          if (msg.setupComplete) {
+            log('Gemini Live Setup bekräftad (setupComplete: true)!', 'success');
+            return;
+          }
+
+          if (msg.serverContent) {
+            const sc = msg.serverContent;
+
+            // Transkription av användarens tal (om tillgängligt)
+            if (sc.userTurn) {
+              log('Mottog användartranskript (userTurn).', 'ws');
+            }
+
+            // Modellens svar (Text och Audio)
+            if (sc.modelTurn && sc.modelTurn.parts) {
+              sc.modelTurn.parts.forEach(part => {
+                // Textbit
+                if (part.text) {
+                  state.modelResponseText += part.text;
+                  translationBox.textContent = state.modelResponseText;
+                  tagTranslationStatus.textContent = 'Mottar översättning...';
+                }
+
+                // Audiobit (oftast 24 000 Hz 16-bit PCM)
+                if (part.inlineData && part.inlineData.data) {
+                  const mime = part.inlineData.mimeType || 'audio/pcm;rate=24000';
+                  const rawPcmBytes = base64ToUint8Array(part.inlineData.data);
+                  state.receivedAudioChunks.push(rawPcmBytes);
+
+                  const totalBytes = state.receivedAudioChunks.reduce((acc, c) => acc + c.length, 0);
+                  geminiAudioStatus.textContent = `Mottagit ${(totalBytes / 1024).toFixed(1)} KB PCM ljud`;
+                }
+              });
+            }
+
+            // Input transcription / Grounding
+            if (sc.inputTranscription) {
+              state.userTranscriptText = sc.inputTranscription.text || state.userTranscriptText;
+              transcriptBox.textContent = state.userTranscriptText;
+              tagTranscriptStatus.textContent = 'Färdig';
+            }
+
+            // Turn complete
+            if (sc.turnComplete) {
+              log('Gemini markerade sekvensen som slutförd (turnComplete: true).', 'success');
+              tagTranslationStatus.textContent = 'Slutförd';
+              tagTranscriptStatus.textContent = 'Slutförd';
+
+              if (!state.userTranscriptText && state.modelResponseText) {
+                // Om Gemini inte skickade separat inputTranscript, indikera att översättningen lyckades
+                transcriptBox.innerHTML = `<span class="text-slate-300">Ljudet mottogs och tolkades felfritt av Gemini Live Translate. Se översättning till höger.</span>`;
+              }
+
+              // Slutför och spela upp ljud
+              finalizeGeminiAudio();
+            }
+
+            if (sc.interrupted) {
+              log('Turn avbröts (interrupted: true).', 'warn');
+            }
+          }
+        }
+
+        // Samla och förbered returljudet från Gemini (24 kHz PCM -> WAV)
+        function finalizeGeminiAudio() {
+          if (state.receivedAudioChunks.length === 0) {
+            log('Inget returljud mottogs från Gemini (endast text mottogs).', 'warn');
+            geminiAudioStatus.textContent = 'Endast text mottogs';
+            return;
+          }
+
+          const totalBytes = state.receivedAudioChunks.reduce((acc, c) => acc + c.length, 0);
+          const mergedU8 = new Uint8Array(totalBytes);
+          let offset = 0;
+          for (const chunk of state.receivedAudioChunks) {
+            mergedU8.set(chunk, offset);
+            offset += chunk.length;
+          }
+
+          // Generera 24 kHz WAV för Geminis returljud
+          const sampleRate = 24000;
+          const wavBlob = createWavFromUint8Pcm(mergedU8, sampleRate, 1);
+          if (state.geminiAudioBlobUrl) {
+            URL.revokeObjectURL(state.geminiAudioBlobUrl);
+          }
+          state.geminiAudioBlobUrl = URL.createObjectURL(wavBlob);
+
+          audioGeminiPlayback.src = state.geminiAudioBlobUrl;
+          btnPlayGeminiAudio.disabled = false;
+          const durationSec = (totalBytes / (sampleRate * 2)).toFixed(1);
+          geminiAudioStatus.textContent = `Klart! ${durationSec}s ljud (${(totalBytes / 1024).toFixed(1)} KB)`;
+          log(`Geminis returljud klart: ${durationSec}s vid 24 kHz WAV.`, 'success');
+
+          // Auto-play om kryssrutan är ikryssad
+          if (chkAutoPlay.checked) {
+            log('Auto-play: Spelar upp Geminis översatta ljud...', 'info');
+            audioGeminiPlayback.currentTime = 0;
+            audioGeminiPlayback.play().catch(e => log(`Autoplay hindrades av webbläsaren: ${e.message}`, 'warn'));
+          }
+        }
+
+        btnPlayGeminiAudio.addEventListener('click', () => {
+          if (!state.geminiAudioBlobUrl) return;
+          audioGeminiPlayback.currentTime = 0;
+          audioGeminiPlayback.play().catch(e => log(`Uppspelningsfel: ${e.message}`, 'error'));
+          log('Spelar upp Geminis översatta returljud...', 'info');
+        });
+
+        function resetStreamingUI() {
+          state.isStreaming = false;
+          btnSendGemini.disabled = !state.fullRecordedPcm16;
+          sendBtnText.textContent = 'Skicka testsekvens till Gemini Live Translate';
+          wsStatusBadge.textContent = 'WebSocket: Stängd';
+          wsStatusBadge.className = 'px-2.5 py-0.5 rounded font-mono text-xs bg-slate-800 border border-slate-700 text-slate-400';
+        }
+
+        btnSendGemini.addEventListener('click', () => {
+          sendPcmToGeminiLive();
+        });
+
+        // --- HJÄLPFUNKTIONER FÖR PCM & BASE64 KONVERTERING ---
+        function int16ToBase64(int16Array) {
+          const u8 = new Uint8Array(int16Array.buffer, int16Array.byteOffset, int16Array.byteLength);
+          let binary = '';
+          const len = u8.byteLength;
+          for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(u8[i]);
+          }
+          return window.btoa(binary);
+        }
+
+        function base64ToUint8Array(base64) {
+          const binaryString = window.atob(base64);
+          const len = binaryString.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          return bytes;
+        }
+
+        function createWavFromUint8Pcm(u8Pcm, sampleRate, numChannels) {
+          const byteLength = u8Pcm.length;
+          const buffer = new ArrayBuffer(44 + byteLength);
+          const view = new DataView(buffer);
+
+          function writeString(offset, string) {
+            for (let i = 0; i < string.length; i++) {
+              view.setUint8(offset + i, string.charCodeAt(i));
+            }
+          }
+
+          writeString(0, 'RIFF');
+          view.setUint32(4, 36 + byteLength, true);
+          writeString(8, 'WAVE');
+          writeString(12, 'fmt ');
+          view.setUint32(16, 16, true);
+          view.setUint16(20, 1, true); // PCM
+          view.setUint16(22, numChannels, true);
+          view.setUint32(24, sampleRate, true);
+          view.setUint32(28, sampleRate * numChannels * 2, true);
+          view.setUint16(32, numChannels * 2, true);
+          view.setUint16(34, 16, true);
+          writeString(36, 'data');
+          view.setUint32(40, byteLength, true);
+
+          const dest = new Uint8Array(buffer, 44);
+          dest.set(u8Pcm);
+
+          return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        // --- LOGG TERMINAL KONTROLLER ---
+        btnClearLog.addEventListener('click', () => {
+          logTerminal.innerHTML = '<div class="text-slate-500">[Logg rensad]</div>';
+        });
+
+        btnCopyLog.addEventListener('click', () => {
+          const text = logTerminal.innerText;
+          navigator.clipboard.writeText(text).then(() => {
+            log('Hela protokolloggen kopierades till urklipp!', 'info');
+          }).catch(err => {
+            log(`Kunde inte kopiera logg: ${err.message}`, 'warn');
+          });
+        });
+
+        // --- INITIERA VID SIDLADDNING ---
+        window.addEventListener('DOMContentLoaded', () => {
+          drawIdleVUMeter();
+          // Lista enheter
+          enumerateAudioDevices();
+          log('Applikation initierad. Klar för sanitetstest av NDI Virtual Webcam / vMix.', 'info');
+        });
+
+      })();
+    </script>
   </body>
 </html>
-
