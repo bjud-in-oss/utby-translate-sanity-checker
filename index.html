@@ -2,7 +2,7 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <title>Gemini Live Translate - Continuous Stream</title>
+  <title>Gemini Live Translate - Continuous Unfiltered Stream</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-white p-8 max-w-2xl mx-auto space-y-6 font-sans">
@@ -16,7 +16,7 @@
     </div>
 
     <div>
-      <label class="block text-xs font-medium text-slate-300 mb-1">Ljudkälla (NDI Webcam Input):</label>
+      <label class="block text-xs font-medium text-slate-300 mb-1">Ljudkälla (NDI / Headset):</label>
       <div class="flex gap-2">
         <select id="deviceSelect" class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm"></select>
         <button id="btnRefreshDevices" class="px-3 py-1 bg-slate-600 hover:bg-slate-500 text-xs rounded cursor-pointer">Sök enheter</button>
@@ -68,7 +68,7 @@
     let nextStartTime = 0;
     let activeAudioSources = [];
 
-    // 1. Sök och lista alla NDI/mikrofonenheter
+    // 1. Sök och lista alla ljudenheter
     async function loadAudioDevices() {
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -86,9 +86,9 @@
           deviceSelect.appendChild(opt);
         });
 
-        statusEl.innerText = `Status: Hittade ${audioInputs.length} ljudenheter. Välj NDI.`;
+        statusEl.innerText = `Status: Hittade ${audioInputs.length} ljudenheter.`;
       } catch (err) {
-        statusEl.innerText = 'Status: Kunde inte lista ljudenheter. Ge tillstånd i webbläsaren.';
+        statusEl.innerText = 'Status: Ge mikrofontillstånd i webbläsaren.';
       }
     }
 
@@ -117,7 +117,7 @@
           btnToggleConnection.innerText = 'Stoppa Simultanöversättning (Koppla från)';
           btnToggleConnection.className = 'w-full py-6 bg-red-600 hover:bg-red-500 text-white font-bold text-lg rounded-xl shadow-lg transition-all cursor-pointer';
           btnToggleConnection.disabled = false;
-          statusEl.innerText = 'Status: 🔴 Live (Server-side VAD aktiv)';
+          statusEl.innerText = 'Status: 🔴 Live (100% Kontinuerlig Ström)';
           break;
 
         case ConnectionState.DISCONNECTING:
@@ -137,7 +137,7 @@
       }
     });
 
-    // 3. Starta WebSocket-pipelinen
+    // 3. Starta WebSocket med anpassad systemInstruktion
     async function startTranslationPipeline() {
       const key = apiKeyInput.value.trim();
       if (!key) return alert('Ange din Gemini API-nyckel!');
@@ -151,6 +151,11 @@
         ws.send(JSON.stringify({
           setup: {
             model: "models/gemini-3.5-live-translate-preview",
+            systemInstruction: {
+              parts: [{
+                text: "You are a professional real-time simultaneous audio translator. Translate all incoming speech into the target language immediately as it is spoken. During silence, background noise, or pauses in speech, stay completely silent and do not generate any text or audio output. Never repeat previous translations. Never generate filler words, guess context, or fabricate speech during silent periods."
+              }]
+            },
             generationConfig: {
               responseModalities: ["AUDIO"],
               translationConfig: {
@@ -195,15 +200,15 @@
       };
     }
 
-    // 4. Starta Mikrofon/NDI med anpassad DSP (Ingen dubbel AEC/AGC, ren brusreducering)
+    // 4. Starta ljudinmatning utan lokala VAD-spärrar
     async function startMicStreaming() {
       const selectedDeviceId = deviceSelect.value;
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-          echoCancellation: false, // Tesira hanterar ekosläckning i hårdvara
-          autoGainControl: false,  // Förhindrar volymhopp
-          noiseSuppression: false  // Mjuk brusreducering för fläktar/rumssus
+          echoCancellation: false,
+          autoGainControl: false,
+          noiseSuppression: false
         }
       });
 
@@ -213,7 +218,7 @@
       
       scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
       
-      // Oavbruten strömning direkt till Geminis server-side VAD
+      // 100 % kontinuerlig strömning utan RMS-mätning eller lokal VAD
       scriptProcessor.onaudioprocess = (e) => {
         if (currentState !== ConnectionState.CONNECTED || !ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -280,7 +285,7 @@
       return pcm16;
     }
 
-    // 7. Sömlös Ljudkö
+    // 7. Sömlös Ljudkö för 24kHz uppspelning
     function queueAudio24kHz(base64Str) {
       if (!playbackCtx || playbackCtx.state === 'closed') {
         playbackCtx = new AudioContext({ sampleRate: 24000 });
