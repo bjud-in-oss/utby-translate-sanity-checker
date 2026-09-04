@@ -10,3 +10,6 @@ Ett renodlat, minimalistiskt testverktyg i en enda fristående HTML-fil (med Van
 - [x] **TCK-002**: Korrigera resampling-förhållande till 16 kHz PCM16 samt ta bort utgående turnCompletePayload.
   - *Mål*: Dynamisk beräkning av `ratio = inputSampleRate / 16000` via AudioContext.sampleRate (så 8s vid 48 kHz ger exakt ~128 000 samples i stället för 256 000) samt avlägsna utgående clientContent.turnComplete för att förhindra WebSocket-felkod 1007.
   - *Status*: Slutförd (Fas 2)
+- [x] **TCK-003**: Realtidsuppspelning av Geminis översatta ljud (Streaming Audio Queue) och manuell Stoppa-kontroll.
+  - *Mål*: Direkt uppspelning av inkommande 24 kHz PCM via schemalagd Web Audio AudioBuffer-kö i realtid utan att vänta på turnComplete, visuell statusindikator ("Översätter & Spelar upp i realtid...") samt en tydlig knapp för att stänga anslutningen/stoppa strömmen manuellt.
+  - *Status*: Slutförd (Fas 2)

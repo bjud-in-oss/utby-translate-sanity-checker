@@ -1,10 +1,12 @@
-# Steg 2a: Förändra Utåt - Vision (TCK-002)
+# Steg 2a: Förändra Utåt - Vision (TCK-003)
 
-### Målbild för användarens ljudflöde
-1. **Kristallklar PCM-provlyssning:**
-   - När användaren spelar in 8 sekunder från sin NDI/vMix-ljudkälla samlas exakt 128 000 samples (16 000 Hz Mono Int16).
-   - Vid klick på "Spela upp PCM" (eller nedladdning av WAV) spelas ljudet upp i perfekt, naturlig hastighet och tonhöjd utan förvrängning, sludder eller mörkt muller.
-2. **Felfri WebSocket-sändning utan felkod 1007:**
-   - När de sista PCM-paketen har strömmats förblir WebSocket-anslutningen lugnt öppen utan att skicka otillåtna styrpaket.
-   - Gemini Live Translate API tar emot ljudströmmen, bearbetar den och returnerar svarsströmmar med text och 24 kHz ljud utan avbrott.
-   - Den grafiska designen, Tailwind-layouten och alla diagnostikpaneler förblir exakt som tidigare.
+### Målbild för användarupplevelsen
+1. **Omedelbar ljudåterkoppling (Streaming Audio):**
+   - Användaren skickar sin inspelade testsekvens.
+   - Så fort Gemini Live Translate genererar sina första ord börjar ljudet omedelbart strömma ut ur högtalarna i realtid.
+   - Användaren slipper vänta på att Gemini pratat färdigt för att höra översättningen.
+2. **Tydlig och transparent status:**
+   - Direkt när första ljudchunken anländer växlar statusindikatorn till en pulserande grön etikett: `"Översätter & Spelar upp i realtid..."`.
+3. **Full kontroll med manuell avbrottsknapp:**
+   - En distinkt röd/mörkgrå "Stäng anslutning / Stoppa"-knapp finns omedelbart tillgänglig.
+   - Klick på knappen bryter WebSocket-anslutningen och klipper omedelbart ljudet så att användaren kan återta kontrollen direkt.

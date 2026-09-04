@@ -1,14 +1,11 @@
-# Steg 3b: Domän, Kontrakt och Fraktal Dokumentation (TCK-002)
+# Steg 3b: Domän, Kontrakt och Fraktal Dokumentation (TCK-003)
 
-### 1. Resampling-kontrakt (PCMRecorderProcessor)
-- `input`: Float32Array (webbläsarens hårdvarusamplingsfrekvens, t.ex. 48 000 Hz)
-- `processorOptions.inputSampleRate`: tal (standard 48 000)
-- `targetSampleRate`: 16 000
-- `ratio`: `inputSampleRate / targetSampleRate`
-- `output`: Int16Array vid exakt 16 000 Hz Mono Little-Endian
-
-### 2. Gemini Live BidiGenerateContent Protokollkontrakt
-- **Setup:** Skickas vid `ws.onopen`.
-- **Media Ingestion:** Strömmar chunks om 1 600 samples (3 200 bytes) med mimeType `audio/pcm;rate=16000`.
-- **Slut på uppladdning:** Inget utgående `turnCompletePayload`. Anslutningen hålls öppen.
-- **Respons:** `serverContent.modelTurn.parts` (text och audio) ackumuleras och spelas upp när `serverContent.turnComplete: true` anländer från servern.
+### Kontrakt för Real-Time Streaming Audio Queue
+- **Input:** `rawPcmBytes` (Uint8Array, 16-bit Mono Little-Endian PCM vid 24 000 Hz från Gemini Live Translate).
+- **Transformation:** Konvertering till `Float32Array` och generering av `AudioBuffer`.
+- **Schemaläggning:**
+  - `startTime = Math.max(state.audioContext.currentTime, state.nextPlaybackTime)`
+  - Buffertens längd beräknas och adderas: `state.nextPlaybackTime = startTime + audioBuffer.duration`.
+- **Avbrott:**
+  - `state.activeAudioSources.forEach(s => s.stop())`
+  - `state.webSocket.close()`

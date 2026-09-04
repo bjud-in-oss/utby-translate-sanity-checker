@@ -1,13 +1,13 @@
-# Steg 3a: Helhet, Orkestrering och Integration (TCK-002)
+# Steg 3a: Helhet, Orkestrering och Integration (TCK-003)
 
-### Orkestreringsflöde
-1. **AudioContext initiering:**
-   - `inputSampleRate = state.audioContext.sampleRate` loggas explicit till diagnostikfönstret.
-   - `AudioWorkletNode` skapas med `processorOptions: { inputSampleRate }`.
-2. **Resampling och buffring (Steg 1):**
-   - AudioWorklet läser input-kanalen, tillämpar `step = inputSampleRate / 16000` och kvantiserar linjärt interpolerade punkter till Int16 Little-Endian.
-   - Vid 8 sekunders inspelning vid 48 kHz erhålls exakt 128 000 samples.
-3. **WebSocket strömning och svarslyssning (Steg 2 & 3):**
-   - 100 ms PCM-chunks skickas sekventiellt via `realtimeInput`.
-   - När alla chunks skickats lämnas anslutningen öppen utan utgående `turnCompletePayload`.
-   - Serverns asynkrona svar tas emot i `ws.onmessage` och triggar `finalizeGeminiAudio()` vid `sc.turnComplete`.
+### Detaljerat händelseflöde
+1. **Användaren klickar på "Skicka testsekvens till Gemini Live Translate":**
+   - Knappen avaktiveras och byter text till "Strömmar...".
+   - Stoppknappen `btn-stop-stream` aktiveras och visas tydligt med röd/mörkgrå varning.
+   - `state.nextPlaybackTime = 0` nollställs.
+2. **Inkommande ljudpaket i `ws.onmessage`:**
+   - Varje `part.inlineData` skickas omedelbart till `queueRealtimeAudioChunk(rawPcmBytes, 24000)`.
+   - Ljudet spelas upp kontinuerligt i realtid genom schemalagda `AudioBufferSourceNode`.
+   - Statusraden för Geminis ljud visar en pulserande grön status: `"Översätter & Spelar upp i realtid..."`.
+3. **Avbrott / Stopp:**
+   - Om användaren klickar på "Stäng anslutning / Stoppa", avbryts anslutningen direkt, alla ljudkällor tystas och UI återställs.

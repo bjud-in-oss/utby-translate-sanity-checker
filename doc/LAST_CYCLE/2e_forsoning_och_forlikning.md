@@ -1,10 +1,10 @@
-# Steg 2e: Försoning och Förlikning (TCK-002)
+# Steg 2e: Försoning och Förlikning (TCK-003)
 
-### Sammanvägning av krav och begränsningar
-- Begäran kräver att ingen layout, stil eller extern struktur rörs.
-- Ändringarna är strikt begränsade till:
-  1. AudioWorklet-koden och dess instansiering för dynamisk resampling med `ratio = inputSampleRate / 16000`.
-  2. Borttagning av den manuella `turnCompletePayload`-sändningen i `streamPcmChunks`.
-- Alla inkommande svarslyssnare och hanterare i `ws.onmessage` förblir intakta.
+### Sammanvägning
+- Samtliga krav i användarens begäran uppfylls:
+  1. Direkt uppspelning via en streaming AudioBuffer-kö i Web Audio API utan att vänta på `turnComplete`.
+  2. Direkt visuell feedback ("Översätter & Spelar upp i realtid...").
+  3. En tillgänglig och tydlig stoppknapp ("Stäng anslutning / Stoppa").
+- Ingen onödig komplexitet eller ändring av appens layout/Tailwind-stil.
 
 MÄTTNAD: JA

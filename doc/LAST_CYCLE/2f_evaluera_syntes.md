@@ -1,7 +1,7 @@
-# Steg 2f: Evaluera Syntes (TCK-002)
+# Steg 2f: Evaluera Syntes (TCK-003)
 
-### Helhetsbedömning före teknisk detaljdesign
-- Problemorsakerna är entydigt isolerade och åtgärderna är väl avgränsade.
-- Inga regressioner eller biverkningar på den grafiska profilen förekommer.
+### Slutgiltig avstämning före teknisk detaljdesign
+- Arkitekturen beaktar både strömmande realtidsuppspelning och kontrollerat avbrott.
+- Beslut är förankrat och redo för detaljspecifikation.
 
 BESLUT: GÅ_TILL_DESIGN

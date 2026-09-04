@@ -1,42 +1,40 @@
-# Steg 1b: Kartlägga (TCK-002)
+# Steg 1b: Kartlägga (TCK-003)
 
 ### Svar på GROW-frågorna mot koden
 
 1. **Effects & Signal Processing:**
-   - I `index.html` användes tidigare globala `sampleRate` inne i AudioWorklet utan att explicit binda den till `state.audioContext.sampleRate` eller tillhandahålla en dynamisk `ratio`-beräkning via nodens `processorOptions`.
-   - Lösning:
-     - Vi hämtar `inputSampleRate = state.audioContext.sampleRate` (t.ex. 48 000 Hz).
-     - Vi skickar med `{ processorOptions: { inputSampleRate } }` vid instantiering av `AudioWorkletNode`.
-     - I AudioWorklet-processorn beräknas:
-       `const inputSampleRate = (options && options.processorOptions && options.processorOptions.inputSampleRate) || sampleRate || 48000;`
-       `this.ratio = inputSampleRate / 16000;`
-     - Steglängden för sampling i processorn sätts till `const step = this.ratio;`.
-     - För en 8-sekunders inspelning vid 48 kHz blir antalet inlästa samples 384 000. Med `step = 3.0` (48000 / 16000) produceras exakt 384 000 / 3 = 128 000 samples, vilket motsvarar exakt 8,0 sekunder vid 16 000 Hz.
+   - I nuläget ackumulerar `handleGeminiServerMessage` inkommande rådata i `state.receivedAudioChunks` och anropar inte `finalizeGeminiAudio()` förrän `sc.turnComplete` är sant. Det innebär att användaren måste vänta tills Gemini pratat färdigt och sessionen är avslutad innan en hel WAV-fil bakas ihop.
+   - Ny mekanism:
+     - Vi skapar funktionen `queueRealtimeAudioChunk(rawPcmBytes, sampleRate = 24000)`.
+     - Int16-data konverteras direkt till Float32Array `[-1.0, 1.0]`.
+     - En `AudioBuffer` skapas: `state.audioContext.createBuffer(1, float32.length, sampleRate)`.
+     - En `AudioBufferSourceNode` skapas, ansluts till `state.audioContext.destination` och schemaläggs vid `startTime = Math.max(state.audioContext.currentTime, state.nextPlaybackTime)`.
+     - Vid första paketet läggs en minimal jitter-buffert (t.ex. 50 ms) till för att garantera sammanhängande ljud.
+     - `state.nextPlaybackTime = startTime + audioBuffer.duration`.
+     - Källnoden sparas i `state.activeAudioSources` så att den omedelbart kan stoppas om användaren klickar på "Stoppa".
+     - Samtidigt sparas `rawPcmBytes` i `state.receivedAudioChunks` i bakgrunden så att användaren fortfarande kan spela upp hela ljudet igen efteråt vid behov.
 
-2. **Contract & WebSocket Protocol:**
-   - I `streamPcmChunks(ws)` i `index.html` finns följande rader som triggar krasch med felkod 1007:
-     ```javascript
-     if (ws.readyState === WebSocket.OPEN) {
-       const turnCompletePayload = {
-         clientContent: {
-           turns: [],
-           turnComplete: true
-         }
-       };
-       ws.send(JSON.stringify(turnCompletePayload));
-     }
-     ```
-   - I Gemini Multimodal Live API förväntar sig servern att kontinuerliga media-chunks strömmas i `realtimeInput`. Ett tomt `clientContent` med tomma turns anses vara ett ogiltigt argument i BidiGenerateContent-sessionen.
-   - Åtgärd: Ta helt bort detta utgående `ws.send()`-anrop. Lämna WebSocket-anslutningen öppen.
-   - Servern skickar själv `serverContent.turnComplete: true` när den har transkriberat och genererat översättningen. Vår inkommande hanterare i `ws.onmessage` förblir 100 % intakt och anropar `finalizeGeminiAudio()`.
+2. **State & UI:**
+   - I `state` tillförs:
+     - `nextPlaybackTime: 0`
+     - `activeAudioSources: []`
+     - `isStreamingAudioPlaying: false`
+   - Gränssnittselement:
+     - En visuell statusetikett och pulserande indikator: `"Översätter & Spelar upp i realtid..."` aktiveras direkt vid första mottagna `inlineData`.
+     - En tydlig knapp `btn-stop-stream` ("Stäng anslutning / Stoppa") placeras bredvid sändningsknappen. Den aktiveras när anslutningen öppnas eller strömning pågår.
+     - Vid klick på "Stoppa":
+       - Avbryter pågående WebSocket via `ws.close(1000, "Manuell avstängning")`.
+       - Stoppar alla schemalagda källor: `state.activeAudioSources.forEach(s => { try { s.stop(); } catch(e){} });`.
+       - Tömmer ljudkön och återställer `state.nextPlaybackTime = 0`.
+       - Uppdaterar UI till avslutat läge.
 
 ```json
 {
   "status": "PLANNING",
   "current_domain": "live_audio_sanity_check",
   "next_step": "2a_forandra_utat_vision",
-  "ticket_id": "TCK-002",
+  "ticket_id": "TCK-003",
   "active_skill": "gemini-api",
-  "active_vectors": ["Contract", "Effects"]
+  "active_vectors": ["State", "Effects", "Contract"]
 }
 ```

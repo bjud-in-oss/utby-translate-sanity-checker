@@ -1,6 +1,7 @@
-# Steg 2b: Evaluera Yttre Anpassning (TCK-002)
+# Steg 2b: Evaluera Yttre Anpassning (TCK-003)
 
-### Analys av yttre anpassning
-- Ändringarna är strikt kirurgiska och fokuserar på de två identifierade bristerna i AudioWorklet och WebSocket-strömningen.
-- Alla gränssnittselement (VU-mätare, enhetsval, inspelningsknappar, statusfält, resultatpaneler och loggterminal) förblir oförändrade för slutanvändaren.
-- Den enda synliga skillnaden i UI är att sändningen inte längre kraschar med felkod 1007, och att loggen och räknaren visar korrekt samplingsmängd (~16 000 samples per sekund, t.ex. ~128 000 samples för 8s).
+### Evaluering
+- Gränssnittets befintliga layout och formspråk i Tailwind bevaras.
+- Knappen "Stäng anslutning / Stoppa" integreras harmoniskt i sändningspanelen bredvid eller under sändningsknappen.
+- Ljuduppspelningen sker direkt i webbläsarens `AudioContext` och stör inte övriga paneler.
+- Inga regressioner uppstår för transkriptionen eller felhanteringen.

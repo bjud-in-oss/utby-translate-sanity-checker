@@ -287,11 +287,15 @@
               Öppnar en direkt WebSocket-anslutning mot <code>models/gemini-3.5-live-translate-preview</code> och strömmar den sparade PCM-bufferten i paket om ~100 ms (1 600 samples = 3 200 bytes per chunk).
             </p>
 
-            <!-- Sändningsknapp -->
-            <div class="pt-2">
-              <button id="btn-send-gemini" type="button" disabled class="w-full py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:hover:bg-sky-600 text-white font-medium text-sm transition shadow-lg shadow-sky-950/50 flex items-center justify-center gap-2 active:scale-[0.99]">
+            <!-- Sändnings- och Stoppknapp -->
+            <div class="pt-2 flex items-center gap-2">
+              <button id="btn-send-gemini" type="button" disabled class="flex-1 py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:hover:bg-sky-600 text-white font-medium text-sm transition shadow-lg shadow-sky-950/50 flex items-center justify-center gap-2 active:scale-[0.99]">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
                 <span id="send-btn-text">Skicka testsekvens till Gemini Live Translate</span>
+              </button>
+              <button id="btn-stop-stream" type="button" disabled class="py-3 px-4 rounded-xl bg-slate-800 hover:bg-red-950/80 hover:text-red-300 disabled:opacity-30 disabled:pointer-events-none text-slate-300 font-medium text-sm transition border border-slate-700 hover:border-red-500/50 flex items-center justify-center gap-1.5" title="Stäng anslutning och stoppa uppspelning">
+                <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                <span class="hidden sm:inline">Stäng / </span><span>Stoppa</span>
               </button>
             </div>
 
@@ -318,9 +322,9 @@
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>
                 <span id="txt-play-gemini">Spela upp översatt ljud</span>
               </button>
-              <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
+              <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none" title="Spelar upp Geminis röst omedelbart medan den genereras via Web Audio API">
                 <input id="chk-auto-play" type="checkbox" checked class="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0" />
-                <span>Auto-play vid mottagande</span>
+                <span>Direkt realtidsuppspelning</span>
               </label>
             </div>
             <audio id="audio-gemini-playback" class="w-full h-8 hidden" controls></audio>
@@ -419,6 +423,8 @@
           receivedAudioChunks: [], // Array of ArrayBuffer / Uint8Array
           fullReceivedAudioBuffer: null,
           geminiAudioBlobUrl: null,
+          nextPlaybackTime: 0,
+          activeAudioSources: [],
         };
 
         // --- DOM REFERENCES ---
@@ -446,6 +452,7 @@
         const linkDownloadWav = document.getElementById('link-download-wav');
         const audioOwnPlayback = document.getElementById('audio-own-playback');
         const btnSendGemini = document.getElementById('btn-send-gemini');
+        const btnStopStream = document.getElementById('btn-stop-stream');
         const sendBtnText = document.getElementById('send-btn-text');
         const wsStatusBadge = document.getElementById('ws-status-badge');
         const streamingCounter = document.getElementById('streaming-counter');
@@ -1055,15 +1062,21 @@
 
           state.isStreaming = true;
           btnSendGemini.disabled = true;
+          btnStopStream.disabled = false;
           sendBtnText.textContent = 'Ansluter till Gemini Live WebSocket...';
           wsStatusBadge.textContent = 'WebSocket: Ansluter...';
           wsStatusBadge.className = 'px-2.5 py-0.5 rounded font-mono text-xs bg-amber-950/60 border border-amber-500/40 text-amber-300';
 
-          // Rensa tidigare resultat
+          // Rensa tidigare resultat och ljudkö
           state.modelResponseText = '';
           state.userTranscriptText = '';
           state.receivedAudioChunks = [];
           state.fullReceivedAudioBuffer = null;
+          state.nextPlaybackTime = 0;
+          if (state.activeAudioSources && state.activeAudioSources.length > 0) {
+            state.activeAudioSources.forEach(s => { try { s.stop(); } catch(e){} });
+          }
+          state.activeAudioSources = [];
           transcriptBox.innerHTML = '<span class="text-slate-500 italic">Väntar på transkribering från Gemini...</span>';
           translationBox.innerHTML = '<span class="text-slate-500 italic">Väntar på översättning från Gemini...</span>';
           tagTranscriptStatus.textContent = 'Bearbetar...';
@@ -1228,12 +1241,11 @@
 
                 // Audiobit (oftast 24 000 Hz 16-bit PCM)
                 if (part.inlineData && part.inlineData.data) {
-                  const mime = part.inlineData.mimeType || 'audio/pcm;rate=24000';
                   const rawPcmBytes = base64ToUint8Array(part.inlineData.data);
                   state.receivedAudioChunks.push(rawPcmBytes);
 
-                  const totalBytes = state.receivedAudioChunks.reduce((acc, c) => acc + c.length, 0);
-                  geminiAudioStatus.textContent = `Mottagit ${(totalBytes / 1024).toFixed(1)} KB PCM ljud`;
+                  // Spela upp direkt i realtid via Web Audio API Streaming Audio Queue
+                  queueRealtimeAudioChunk(rawPcmBytes, 24000);
                 }
               });
             }
@@ -1252,11 +1264,10 @@
               tagTranscriptStatus.textContent = 'Slutförd';
 
               if (!state.userTranscriptText && state.modelResponseText) {
-                // Om Gemini inte skickade separat inputTranscript, indikera att översättningen lyckades
                 transcriptBox.innerHTML = `<span class="text-slate-300">Ljudet mottogs och tolkades felfritt av Gemini Live Translate. Se översättning till höger.</span>`;
               }
 
-              // Slutför och spela upp ljud
+              // Förbered samlad WAV-kopia för eventuell manuell återlyssning
               finalizeGeminiAudio();
             }
 
@@ -1266,7 +1277,88 @@
           }
         }
 
-        // Samla och förbered returljudet från Gemini (24 kHz PCM -> WAV)
+        // Realtidsuppspelning av inkommande PCM-paket via Web Audio API AudioBuffer-kö
+        function queueRealtimeAudioChunk(rawPcmBytes, sampleRate = 24000) {
+          if (chkAutoPlay && !chkAutoPlay.checked) {
+            const totalBytes = state.receivedAudioChunks.reduce((acc, c) => acc + c.length, 0);
+            geminiAudioStatus.textContent = `Mottagit ${(totalBytes / 1024).toFixed(1)} KB (realtidsljud tystat)`;
+            return;
+          }
+
+          if (!state.audioContext) return;
+          if (state.audioContext.state === 'suspended') {
+            state.audioContext.resume();
+          }
+
+          try {
+            // Konvertera Int16 Little-Endian till Float32 [-1.0, 1.0]
+            const int16 = new Int16Array(rawPcmBytes.buffer, rawPcmBytes.byteOffset, rawPcmBytes.byteLength / 2);
+            const float32 = new Float32Array(int16.length);
+            for (let i = 0; i < int16.length; i++) {
+              const s = int16[i];
+              float32[i] = s < 0 ? s / 0x8000 : s / 0x7FFF;
+            }
+
+            const audioBuffer = state.audioContext.createBuffer(1, float32.length, sampleRate);
+            audioBuffer.getChannelData(0).set(float32);
+
+            const source = state.audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(state.audioContext.destination);
+
+            const now = state.audioContext.currentTime;
+            if (state.nextPlaybackTime < now) {
+              // Minimal jitter-buffert (50 ms) för sömlös övergång
+              state.nextPlaybackTime = now + 0.05;
+            }
+
+            source.start(state.nextPlaybackTime);
+            state.nextPlaybackTime += audioBuffer.duration;
+
+            state.activeAudioSources.push(source);
+            source.onended = () => {
+              const idx = state.activeAudioSources.indexOf(source);
+              if (idx !== -1) state.activeAudioSources.splice(idx, 1);
+              if (state.activeAudioSources.length === 0 && !state.isStreaming) {
+                geminiAudioStatus.textContent = 'Realtidsuppspelning klar';
+              }
+            };
+
+            // Visuell indikator under pågående realtidsuppspelning
+            geminiAudioStatus.innerHTML = '<span class="text-emerald-400 font-semibold animate-pulse flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Översätter &amp; Spelar upp i realtid...</span>';
+          } catch (err) {
+            log(`Kunde inte schemalägga realtidsljud: ${err.message}`, 'error');
+          }
+        }
+
+        // Stoppa sändning och tysta schemalagt ljud manuellt
+        function stopStreamingAndAudio() {
+          log('Användaren stoppade strömning och ljud manuellt.', 'warn');
+
+          if (state.webSocket) {
+            try {
+              state.webSocket.close(1000, 'Stoppad av användaren');
+            } catch (e) {}
+            state.webSocket = null;
+          }
+
+          if (state.activeAudioSources && state.activeAudioSources.length > 0) {
+            state.activeAudioSources.forEach(src => {
+              try { src.stop(); } catch (e) {}
+            });
+            state.activeAudioSources = [];
+          }
+          state.nextPlaybackTime = 0;
+
+          if (audioGeminiPlayback) {
+            audioGeminiPlayback.pause();
+          }
+
+          geminiAudioStatus.textContent = 'Avbruten av användaren';
+          resetStreamingUI();
+        }
+
+        // Samla och förbered returljudet från Gemini (24 kHz PCM -> WAV för arkivering/manuell provlyssning)
         function finalizeGeminiAudio() {
           if (state.receivedAudioChunks.length === 0) {
             log('Inget returljud mottogs från Gemini (endast text mottogs).', 'warn');
@@ -1293,27 +1385,20 @@
           audioGeminiPlayback.src = state.geminiAudioBlobUrl;
           btnPlayGeminiAudio.disabled = false;
           const durationSec = (totalBytes / (sampleRate * 2)).toFixed(1);
-          geminiAudioStatus.textContent = `Klart! ${durationSec}s ljud (${(totalBytes / 1024).toFixed(1)} KB)`;
-          log(`Geminis returljud klart: ${durationSec}s vid 24 kHz WAV.`, 'success');
-
-          // Auto-play om kryssrutan är ikryssad
-          if (chkAutoPlay.checked) {
-            log('Auto-play: Spelar upp Geminis översatta ljud...', 'info');
-            audioGeminiPlayback.currentTime = 0;
-            audioGeminiPlayback.play().catch(e => log(`Autoplay hindrades av webbläsaren: ${e.message}`, 'warn'));
-          }
+          log(`Geminis samlade returljud sammanställt: ${durationSec}s vid 24 kHz WAV (redoförberett för provlyssning).`, 'success');
         }
 
         btnPlayGeminiAudio.addEventListener('click', () => {
           if (!state.geminiAudioBlobUrl) return;
           audioGeminiPlayback.currentTime = 0;
           audioGeminiPlayback.play().catch(e => log(`Uppspelningsfel: ${e.message}`, 'error'));
-          log('Spelar upp Geminis översatta returljud...', 'info');
+          log('Spelar upp Geminis översatta returljud (WAV)...', 'info');
         });
 
         function resetStreamingUI() {
           state.isStreaming = false;
           btnSendGemini.disabled = !state.fullRecordedPcm16;
+          btnStopStream.disabled = true;
           sendBtnText.textContent = 'Skicka testsekvens till Gemini Live Translate';
           wsStatusBadge.textContent = 'WebSocket: Stängd';
           wsStatusBadge.className = 'px-2.5 py-0.5 rounded font-mono text-xs bg-slate-800 border border-slate-700 text-slate-400';
@@ -1321,6 +1406,10 @@
 
         btnSendGemini.addEventListener('click', () => {
           sendPcmToGeminiLive();
+        });
+
+        btnStopStream.addEventListener('click', () => {
+          stopStreamingAndAudio();
         });
 
         // --- HJÄLPFUNKTIONER FÖR PCM & BASE64 KONVERTERING ---
