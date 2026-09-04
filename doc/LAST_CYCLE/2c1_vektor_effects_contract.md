@@ -1,15 +1,13 @@
-# Steg 3c: Fil-operativ Källkodsspecifikation (TCK-002)
+# Steg 2c1: Vektoranalys - Effects & Contract (TCK-002)
 
-### Källkodsändringar för index.html
-
-#### 1. AudioWorklet-processor i `createInlineWorkletBlob`
+### 1. Effects: AudioWorklet Resampling-beräkning
+I `createInlineWorkletBlob()`:
 ```javascript
 class PCMRecorderProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     const inputSampleRate = (options && options.processorOptions && options.processorOptions.inputSampleRate) || sampleRate || 48000;
-    this.targetSampleRate = 16000;
-    this.ratio = inputSampleRate / this.targetSampleRate;
+    this.ratio = inputSampleRate / 16000;
     this.sourceIndex = 0;
     this.lastSample = 0;
   }
@@ -45,19 +43,33 @@ class PCMRecorderProcessor extends AudioWorkletProcessor {
   }
 }
 ```
-
-#### 2. Instansiering av `AudioWorkletNode`
+Och i anropet vid start av inspelning:
 ```javascript
-const inputSampleRate = state.audioContext.sampleRate || 48000;
-log(`Ljudkort samplingsfrekvens: ${inputSampleRate} Hz -> Mål: 16 000 Hz (ratio: ${(inputSampleRate / 16000).toFixed(4)})`, 'info');
 const workletNode = new AudioWorkletNode(state.audioContext, 'pcm-recorder-processor', {
   processorOptions: {
-    inputSampleRate: inputSampleRate
+    inputSampleRate: state.audioContext.sampleRate
   }
 });
 ```
 
-#### 3. Avlägsnande av manuell turnComplete i `streamPcmChunks`
-BORTTAGEN_PROP: turnCompletePayload (utgående `ws.send(JSON.stringify(turnCompletePayload))` raderas helt så anslutningen förblir öppen utan otillåtna argument).
-
-BESLUT: GODKÄND
+### 2. Contract: Avlägsnande av clientContent.turnComplete
+I `streamPcmChunks(ws)`:
+Efter att loopen med PCM-chunks har slutförts:
+- Ta bort:
+  ```javascript
+  if (ws.readyState === WebSocket.OPEN) {
+    const turnCompletePayload = {
+      clientContent: {
+        turns: [],
+        turnComplete: true
+      }
+    };
+    ws.send(JSON.stringify(turnCompletePayload));
+  }
+  ```
+- Ersätt med:
+  ```javascript
+  log(`Alla ${totalChunks} PCM-chunks har strömmats till Gemini Live. WebSocket förblir öppen och väntar på modellsvar...`, 'success');
+  sendBtnText.textContent = 'Väntar på Geminis svar...';
+  streamingLabel.textContent = 'Sändning klar • Väntar på respons';
+  ```

@@ -506,14 +506,17 @@
 
         // --- INLINE AUDIOWORKLET CREATOR ---
         // Skapar en inline AudioWorklet via en Blob. Den resamplar inkommande ljud
-        // till exakt 16 000 Hz och kvantiserar till 16-bit PCM Little-Endian int16.
+        // dynamiskt (ratio = inputSampleRate / 16000) till exakt 16 000 Hz och kvantiserar till 16-bit PCM Little-Endian int16.
         function createInlineWorkletBlob() {
           if (state.workletBlobUrl) return state.workletBlobUrl;
           const workletCode = `
             class PCMRecorderProcessor extends AudioWorkletProcessor {
-              constructor() {
+              constructor(options) {
                 super();
+                // Dynamisk beräkning: ratio = inputSampleRate / 16000
+                const inputSampleRate = (options && options.processorOptions && options.processorOptions.inputSampleRate) || sampleRate || 48000;
                 this.targetSampleRate = 16000;
+                this.ratio = inputSampleRate / this.targetSampleRate;
                 this.sourceIndex = 0;
                 this.lastSample = 0;
               }
@@ -522,9 +525,7 @@
                 const input = inputs[0];
                 if (!input || !input[0] || input[0].length === 0) return true;
                 const inputChannel = input[0];
-                const srcRate = sampleRate; // Web Audio standard global
-                const tgtRate = this.targetSampleRate;
-                const step = srcRate / tgtRate;
+                const step = this.ratio > 0 ? this.ratio : 1;
 
                 const outputSamples = [];
                 while (this.sourceIndex < inputChannel.length) {
@@ -840,12 +841,18 @@
           }
 
           try {
-            log('Initierar AudioWorklet för inspelning till 16 000 Hz 16-bit Mono PCM...', 'info');
+            const inputSampleRate = state.audioContext.sampleRate || 48000;
+            const resampleRatio = (inputSampleRate / 16000).toFixed(4);
+            log(`Initierar AudioWorklet för inspelning till 16 000 Hz 16-bit Mono PCM (Input: ${inputSampleRate} Hz, Ratio: ${resampleRatio})...`, 'info');
             const workletUrl = createInlineWorkletBlob();
             await state.audioContext.audioWorklet.addModule(workletUrl);
 
             const source = state.audioContext.createMediaStreamSource(state.mediaStream);
-            const workletNode = new AudioWorkletNode(state.audioContext, 'pcm-recorder-processor');
+            const workletNode = new AudioWorkletNode(state.audioContext, 'pcm-recorder-processor', {
+              processorOptions: {
+                inputSampleRate: inputSampleRate
+              }
+            });
 
             state.recordedChunks = [];
             state.totalRecordedSamples = 0;
@@ -1188,20 +1195,9 @@
             await new Promise(r => setTimeout(r, 80));
           }
 
-          log(`Alla ${totalChunks} PCM-chunks har skickats till Gemini Live. Skickar turnComplete signal...`, 'success');
+          log(`Alla ${totalChunks} PCM-chunks har strömmats till Gemini Live. WebSocket förblir öppen och väntar på modellsvar...`, 'success');
           sendBtnText.textContent = 'Väntar på Geminis svar...';
           streamingLabel.textContent = 'Sändning klar • Väntar på respons';
-
-          // Skicka turnComplete
-          if (ws.readyState === WebSocket.OPEN) {
-            const turnCompletePayload = {
-              clientContent: {
-                turns: [],
-                turnComplete: true
-              }
-            };
-            ws.send(JSON.stringify(turnCompletePayload));
-          }
         }
 
         // Hantera meddelanden från Gemini Live Translate API

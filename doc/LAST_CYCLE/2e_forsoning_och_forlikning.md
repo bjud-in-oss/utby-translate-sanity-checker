@@ -1,9 +1,10 @@
-# Steg 2e: Försoning och Förlikning
+# Steg 2e: Försoning och Förlikning (TCK-002)
 
 ### Sammanvägning av krav och begränsningar
-- **Enhetskrav:** Single-file HTML (Vanilla JS + Tailwind CDN + inbäddad AudioWorklet) för maximal portabilitet och sanitetstestning utan lokala beroenden.
-- **Domänkrav:** Google Gemini Live Translate API (`models/gemini-3.5-live-translate-preview`), 16 000 Hz 16-bit Little-Endian Mono PCM, ~100 ms chunk streaming.
-- **Feedbackkrav:** VU-mätare, "Egen ljud-dump" (WAV-uppspelning av den insamlade datan), transkriberings- och översättningskort samt automatisk uppspelning av Geminis returljud.
-- **Arkitektonisk renhet:** Inga kompromisser med DSP (alla filter strikt avstängda). Ingen medhörning under inspelning.
+- Begäran kräver att ingen layout, stil eller extern struktur rörs.
+- Ändringarna är strikt begränsade till:
+  1. AudioWorklet-koden och dess instansiering för dynamisk resampling med `ratio = inputSampleRate / 16000`.
+  2. Borttagning av den manuella `turnCompletePayload`-sändningen i `streamPcmChunks`.
+- Alla inkommande svarslyssnare och hanterare i `ws.onmessage` förblir intakta.
 
 MÄTTNAD: JA

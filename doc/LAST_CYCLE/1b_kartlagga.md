@@ -1,51 +1,42 @@
-# Steg 1b: Kartlägga
+# Steg 1b: Kartlägga (TCK-002)
 
-### Svar på GROW-frågorna mot kodbasen och domänen
+### Svar på GROW-frågorna mot koden
 
-1. **State & Contract:**
-   - Den nuvarande kodbasen är en ren React/Vite-mall med ett tomt `App.tsx` och standard `index.html`.
-   - Användaren begär specifikt att verktyget byggs som en **minimal, fristående Web Audio-applikation i en enda HTML-fil (HTML, Vanilla JS och Tailwind CDN)**.
-   - Vi implementerar en ren, deterministisk tillståndsmaskin:
-     - `UNCONFIGURED` (saknar API-nyckel eller enhetsval)
-     - `READY` (enhet vald och API-nyckel angiven, realtids-VU aktiv)
-     - `RECORDING` (fångar 16 kHz 16-bit PCM till en dynamisk TypedArray-buffert, 5–10 s)
-     - `RECORDED` (inspelning stoppad, buffert låst, klar för sändning eller lokal provlyssning)
-     - `SENDING` (öppnar WebSocket, skickar setup-meddelande och därefter 100 ms PCM-paket)
-     - `WAITING_RESPONSE` (väntar på transkribering, översättning och returljud)
-     - `DONE` (visar källtranskript, översättning och spelar upp översatt ljud)
-     - `ERROR` (visar utförlig diagnostik och felorsak)
+1. **Effects & Signal Processing:**
+   - I `index.html` användes tidigare globala `sampleRate` inne i AudioWorklet utan att explicit binda den till `state.audioContext.sampleRate` eller tillhandahålla en dynamisk `ratio`-beräkning via nodens `processorOptions`.
+   - Lösning:
+     - Vi hämtar `inputSampleRate = state.audioContext.sampleRate` (t.ex. 48 000 Hz).
+     - Vi skickar med `{ processorOptions: { inputSampleRate } }` vid instantiering av `AudioWorkletNode`.
+     - I AudioWorklet-processorn beräknas:
+       `const inputSampleRate = (options && options.processorOptions && options.processorOptions.inputSampleRate) || sampleRate || 48000;`
+       `this.ratio = inputSampleRate / 16000;`
+     - Steglängden för sampling i processorn sätts till `const step = this.ratio;`.
+     - För en 8-sekunders inspelning vid 48 kHz blir antalet inlästa samples 384 000. Med `step = 3.0` (48000 / 16000) produceras exakt 384 000 / 3 = 128 000 samples, vilket motsvarar exakt 8,0 sekunder vid 16 000 Hz.
 
-2. **Effects & I/O:**
-   - Web Audio API konfigureras med ett `AudioContext` och en inline `AudioWorkletProcessor` (skapad via en data/blob-URL).
-   - `navigator.mediaDevices.getUserMedia` anropas med:
+2. **Contract & WebSocket Protocol:**
+   - I `streamPcmChunks(ws)` i `index.html` finns följande rader som triggar krasch med felkod 1007:
      ```javascript
-     {
-       audio: {
-         deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-         echoCancellation: false,
-         noiseSuppression: false,
-         autoGainControl: false,
-         channelCount: 1,
-         sampleRate: 16000
-       }
+     if (ws.readyState === WebSocket.OPEN) {
+       const turnCompletePayload = {
+         clientContent: {
+           turns: [],
+           turnComplete: true
+         }
+       };
+       ws.send(JSON.stringify(turnCompletePayload));
      }
      ```
-   - Workleten nedsamplar eller konverterar inkommande Float32-samples till Int16 PCM och skickar tillbaka dem till huvudtråden.
-   - En canvas- eller CSS-baserad VU-mätare kopplas via en `AnalyserNode` för att i realtid bekräfta att NDI/vMix skickar ljudsignal.
-   - WebSocket ansluts direkt mot Gemini Multimodal Live API:
-     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`
-
-3. **Resilience & Feedback:**
-   - PCM-bufferten sparas även lokalt. En funktion skapar ett standard 44-byte RIFF WAV-huvud och en `Blob` så användaren med ett klick kan lyssna på den råa inspelningen ("Egen ljud-dump").
-   - Detaljerad statuslogg visas på skärmen för varje skickat paket, WebSocket-händelse och inkommande svarsfragment.
+   - I Gemini Multimodal Live API förväntar sig servern att kontinuerliga media-chunks strömmas i `realtimeInput`. Ett tomt `clientContent` med tomma turns anses vara ett ogiltigt argument i BidiGenerateContent-sessionen.
+   - Åtgärd: Ta helt bort detta utgående `ws.send()`-anrop. Lämna WebSocket-anslutningen öppen.
+   - Servern skickar själv `serverContent.turnComplete: true` när den har transkriberat och genererat översättningen. Vår inkommande hanterare i `ws.onmessage` förblir 100 % intakt och anropar `finalizeGeminiAudio()`.
 
 ```json
 {
   "status": "PLANNING",
   "current_domain": "live_audio_sanity_check",
   "next_step": "2a_forandra_utat_vision",
-  "ticket_id": "TCK-001",
+  "ticket_id": "TCK-002",
   "active_skill": "gemini-api",
-  "active_vectors": ["State", "Contract", "Effects", "Resilience"]
+  "active_vectors": ["Contract", "Effects"]
 }
 ```
