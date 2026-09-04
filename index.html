@@ -223,24 +223,39 @@
       scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
       
       scriptProcessor.onaudioprocess = (e) => {
-        if (currentState !== ConnectionState.CONNECTED || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (currentState !== ConnectionState.CONNECTED || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-        const float32 = e.inputBuffer.getChannelData(0);
-        const pcm16 = convertTo16kHz(float32, inputRate);
-        
-        const bytes = new Uint8Array(pcm16.buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const float32 = e.inputBuffer.getChannelData(0);
 
-        ws.send(JSON.stringify({
-          realtimeInput: {
-            mediaChunks: [{
-              mimeType: "audio/pcm;rate=16000",
-              data: btoa(binary)
-            }]
-          }
-        }));
-      };
+  // 1. Beräkna ljudvolym (RMS)
+  let sum = 0;
+  for (let i = 0; i < float32.length; i++) {
+    sum += float32[i] * float32[i];
+  }
+  const rms = Math.sqrt(sum / float32.length);
+
+  // 2. Brusgrind (Noise Gate): Skicka endast om någon faktiskt talar (RMS > 0.01)
+  const NOISE_THRESHOLD = 0.01; 
+  if (rms < NOISE_THRESHOLD) {
+    return; // Tystnad: Skicka inga paket som kan lura modellen att hallucinera
+  }
+
+  // 3. Konvertera och skicka endast när tal detekteras
+  const pcm16 = convertTo16kHz(float32, inputRate);
+  
+  const bytes = new Uint8Array(pcm16.buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+
+  ws.send(JSON.stringify({
+    realtimeInput: {
+      mediaChunks: [{
+        mimeType: "audio/pcm;rate=16000",
+        data: btoa(binary)
+      }]
+    }
+  }));
+};
 
       source.connect(scriptProcessor);
       scriptProcessor.connect(audioContext.destination);
