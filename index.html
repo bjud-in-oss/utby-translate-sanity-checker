@@ -2,36 +2,46 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <title>Gemini Live Translate - Manuell VAD (Push-To-Talk)</title>
+  <title>Gemini Live Translate - Stabil Push-To-Talk</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-white p-8 max-w-2xl mx-auto space-y-6 font-sans">
-  <h1 class="text-xl font-bold text-blue-400">Gemini Live - Manuell VAD (Push-To-Talk)</h1>
+  <h1 class="text-xl font-bold text-blue-400">Gemini Live Translate - Sanity Check</h1>
 
+  <!-- Inställningar & Anslutning -->
   <div class="bg-slate-800 p-4 rounded-lg space-y-3">
     <div>
       <label class="block text-xs font-medium text-slate-300 mb-1">Gemini API-nyckel:</label>
       <input type="password" id="apiKey" placeholder="AIzaSy..." class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm">
     </div>
-    <div>
-      <label class="block text-xs font-medium text-slate-300 mb-1">Målspråk:</label>
-      <input type="text" id="targetLang" value="en" class="w-24 p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm">
+    <div class="flex gap-4">
+      <div class="flex-1">
+        <label class="block text-xs font-medium text-slate-300 mb-1">Målspråk:</label>
+        <input type="text" id="targetLang" value="en" class="w-full p-2 bg-slate-700 rounded border border-slate-600 outline-none text-sm">
+      </div>
+      <div class="flex items-end">
+        <button id="btnConnect" class="px-6 py-2 bg-green-600 hover:bg-green-500 font-bold text-sm rounded">
+          Anslut
+        </button>
+      </div>
     </div>
   </div>
 
+  <!-- Taltangent -->
   <div class="flex justify-center">
-    <button id="pttBtn" class="w-full py-8 bg-blue-600 hover:bg-blue-500 active:bg-red-600 font-bold text-lg rounded-xl select-none shadow-lg transition-colors">
-      HÅLL IN FÖR ATT TALA (Push-To-Talk)
+    <button id="pttBtn" disabled class="w-full py-8 bg-slate-700 text-slate-500 cursor-not-allowed font-bold text-lg rounded-xl select-none shadow-lg transition-colors">
+      KOPPLA UPP FÖRST
     </button>
   </div>
 
   <div class="bg-slate-800 p-4 rounded-lg space-y-2">
-    <div id="status" class="text-slate-400 font-mono text-sm">Status: Redo</div>
+    <div id="status" class="text-slate-400 font-mono text-sm">Status: Ej ansluten</div>
     <div id="transcript" class="text-green-400 font-sans text-base min-h-[3rem]"></div>
   </div>
 
   <script>
     const pttBtn = document.getElementById('pttBtn');
+    const btnConnect = document.getElementById('btnConnect');
     const statusEl = document.getElementById('status');
     const transcriptEl = document.getElementById('transcript');
     const apiKeyInput = document.getElementById('apiKey');
@@ -43,34 +53,28 @@
     let scriptProcessor = null;
     let isTalking = false;
 
-    // 1. Initiera WebSocket-anslutning med inaktiverad VAD
-    function connectWebSocket() {
+    // 1. Koppla upp i förväg och vänta på setupComplete
+    btnConnect.addEventListener('click', () => {
       const key = apiKeyInput.value.trim();
-      if (!key) {
-        alert('Ange din API-nyckel först!');
-        return false;
-      }
+      if (!key) return alert('Ange din API-nyckel!');
 
-      if (ws && ws.readyState === WebSocket.OPEN) return true;
+      if (ws) ws.close();
 
       statusEl.innerText = 'Status: Ansluter till Gemini WebSocket...';
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${key}`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        statusEl.innerText = 'Status: WebSocket ansluten. Konfigurerar manuell VAD...';
+        statusEl.innerText = 'Status: WebSocket ansluten. Skickar konfiguration...';
         
-        // Setup-meddelande med inaktiverad automatisk VAD
+        // Officiell, ren setup-struktur för Live Translate
         ws.send(JSON.stringify({
           setup: {
             model: "models/gemini-3.5-live-translate-preview",
             generationConfig: {
               responseModalities: ["AUDIO"],
-              speechConfig: {
-                automaticActivityDetection: {
-                  disabled: true // Inaktiverar automatiska gissningar från Gemini
-                }
-              },
+              inputAudioTranscription: {},
+              outputAudioTranscription: {},
               translationConfig: {
                 targetLanguageCode: targetLangInput.value.trim() || "en",
                 echoTargetLanguage: true
@@ -83,8 +87,12 @@
       ws.onmessage = async (evt) => {
         let msg = evt.data instanceof Blob ? JSON.parse(await evt.data.text()) : JSON.parse(evt.data);
 
+        // Lås upp knappen ENBART när setupComplete mottagits
         if (msg.setupComplete) {
-          statusEl.innerText = 'Status: Redo för röstinmatning (Håll in knappen)';
+          statusEl.innerText = 'Status: Redo! Håll in knappen för att tala.';
+          pttBtn.disabled = false;
+          pttBtn.innerText = 'HÅLL IN FÖR ATT TALA (Push-To-Talk)';
+          pttBtn.className = 'w-full py-8 bg-blue-600 hover:bg-blue-500 active:bg-red-600 text-white cursor-pointer font-bold text-lg rounded-xl select-none shadow-lg transition-colors';
         }
 
         if (msg.serverContent?.modelTurn?.parts) {
@@ -101,31 +109,23 @@
       };
 
       ws.onerror = () => { statusEl.innerText = 'Status: ❌ WebSocket-fel!'; };
-      ws.onclose = () => { statusEl.innerText = 'Status: Frånkopplad.'; ws = null; };
+      ws.onclose = (e) => { 
+        statusEl.innerText = `Status: Frånkopplad (Kod: ${e.code}).`; 
+        pttBtn.disabled = true;
+        pttBtn.innerText = 'KOPPLA UPP FÖRST';
+        pttBtn.className = 'w-full py-8 bg-slate-700 text-slate-500 cursor-not-allowed font-bold text-lg rounded-xl select-none shadow-lg';
+        ws = null; 
+      };
+    });
 
-      return true;
-    }
-
-    // 2. Starta tal (Mousedown / Touchstart)
+    // 2. Starta tal (Tryck ner knapp)
     pttBtn.addEventListener('mousedown', async () => {
-      if (!connectWebSocket()) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
       isTalking = true;
       transcriptEl.innerText = '';
-      statusEl.innerText = 'Status: 🎤 Skickar ActivityStart... (Talar)';
-      pttBtn.classList.add('bg-red-600');
+      statusEl.innerText = 'Status: 🎤 Strömmar ljud...';
 
-      // Vänta tills WebSocket är redo om den precis öppnades
-      if (ws.readyState !== WebSocket.OPEN) {
-        await new Promise(res => ws.addEventListener('open', res, { once: true }));
-      }
-
-      // Skicka explicit ActivityStart
-      ws.send(JSON.stringify({
-        realtimeInput: { activityStart: {} }
-      }));
-
-      // Starta mikrofoninsamling uten DSP
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
@@ -134,7 +134,6 @@
       const inputRate = audioContext.sampleRate;
       const source = audioContext.createMediaStreamSource(mediaStream);
       
-      // Buffra och skicka i chankar
       scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
       
       scriptProcessor.onaudioprocess = (e) => {
@@ -143,7 +142,6 @@
         const float32 = e.inputBuffer.getChannelData(0);
         const pcm16 = convertTo16kHz(float32, inputRate);
         
-        // Konvertera Int16 till Base64 och skicka
         const bytes = new Uint8Array(pcm16.buffer);
         let binary = '';
         for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
@@ -162,30 +160,22 @@
       scriptProcessor.connect(audioContext.destination);
     });
 
-    // 3. Avsluta tal (Mouseup / Touchend)
+    // 3. Släpp knapp -> Stoppa mikrofonen
     async function stopTalking() {
       if (!isTalking) return;
       isTalking = false;
-      pttBtn.classList.remove('bg-red-600');
 
-      // Stäng mikrofon och audioContext
       if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
       if (audioContext) await audioContext.close();
 
       if (ws && ws.readyState === WebSocket.OPEN) {
-        statusEl.innerText = 'Status: ⏹ Skickar ActivityEnd... Väntar på svar';
-        
-        // Skicka explicit ActivityEnd så Gemini stänger yttrandet direkt
-        ws.send(JSON.stringify({
-          realtimeInput: { activityEnd: {} }
-        }));
+        statusEl.innerText = 'Status: ⏹ Väntar på Gemini översättning...';
       }
     }
 
     pttBtn.addEventListener('mouseup', stopTalking);
     pttBtn.addEventListener('mouseleave', stopTalking);
 
-    // Rätt resamplingsfunktion (Float32 -> 16kHz PCM16)
     function convertTo16kHz(float32, inputRate) {
       const ratio = inputRate / 16000;
       const outLen = Math.floor(float32.length / ratio);
@@ -197,7 +187,6 @@
       return pcm16;
     }
 
-    // Spela upp 24kHz PCM16-ljud från Gemini
     function playAudio24kHz(base64Str) {
       const str = atob(base64Str);
       const bytes = new Uint8Array(str.length);
